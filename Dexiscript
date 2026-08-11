@@ -59,35 +59,83 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
-Section:NewButton("Infinite Jumps", "Jump While in the AIR", function()
+
+Section:NewToggle("Inf Jumps", "Jump while in the air", function(state)
+    if state then
+	    local Players = game:GetService("Players")
+	    local UserInputService = game:GetService("UserInputService")
+
+	    local player = Players.LocalPlayer
+
+	    local infiniteJump = true
+
+	    UserInputService.JumpRequest:Connect(function()
+		    if not infiniteJump then
+			    return
+		    end
+
+		    local character = player.Character
+		    if not character then return end
+
+		    local humanoid = character:FindFirstChildOfClass("Humanoid")
+		    if humanoid then
+			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		    end
+	    end)
+    else
+	    local Players = game:GetService("Players")
+	    local UserInputService = game:GetService("UserInputService")
+
+	    local player = Players.LocalPlayer
+
+	    local infiniteJump = false
+
+	    UserInputService.JumpRequest:Connect(function()
+		    if not infiniteJump then
+			    return
+		    end
+
+		    local character = player.Character
+		    if not character then return end
+
+		    local humanoid = character:FindFirstChildOfClass("Humanoid")
+		    if humanoid then
+			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		    end
+	    end)
+    end
+end)
+
+Section:NewSlider("Teleport", "Teleport in yout direction", 250, 5, function(tpd) -- 500 (MaxValue) | 0 (MinValue)
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
 	local player = Players.LocalPlayer
+	local distance = [tpd]:FireServer()
 
-	-- Меняй это значение из своего GUI:
-	local infiniteJump = true
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
 
-	UserInputService.JumpRequest:Connect(function()
-		if not infiniteJump then
-			return
-		end
+		if input.KeyCode == Enum.KeyCode.V then
+			local character = player.Character
+			if not character then return end
 
-		local character = player.Character
-		if not character then return end
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if not root then return end
 
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			root.CFrame = root.CFrame + root.CFrame.LookVector * distance
 		end
 	end)
 end)
 
 
+local Section = Main:NewSection("Player")
+
+
 --Game--
 local Main = Window.NewTab("Game")
 local Section = Main:NewSection("Lucky Block Spawner")
-Section:NewDropdown("DropdownText", "DropdownInf", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUAL)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
     local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
     Event:FireServer()
 end)
