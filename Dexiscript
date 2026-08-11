@@ -1,161 +1,119 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+
 local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
 
--- Подключаем сервисы Roblox один раз
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-
-local player = Players.LocalPlayer
-
--- ==================== ГЛОБАЛЬНЫЕ НАСТРОЙКИ ФУНКЦИЙ ====================
-local currentWalkSpeed = 16
-local currentJumpPower = 50
-local currentTpDistance = 5 -- Начальная дистанция для телепорта вперед
-
-local isFlingEnabled = false -- Состояние вращения (кнопка K)
-local flingSpeed = 12000 -- Градусы в секунду
-
-local isInfJumpEnabled = false -- Состояние бесконечного прыжка
-
--- Автоматическое обновление ссылок на персонажа и применение настроек при респавне
-local function setupCharacter(character)
-    local humanoid = character:WaitForChild("Humanoid", 10)
-    if humanoid then
-        humanoid.UseJumpPower = true
-        humanoid.WalkSpeed = currentWalkSpeed
-        humanoid.JumpPower = currentJumpPower
-    end
-end
-
-if player.Character then setupCharacter(player.Character) end
-player.CharacterAdded:Connect(setupCharacter)
-
-
--- ==================== ЕДИНЫЕ ФОНОВЫЕ ЦИКЛЫ И БИНДЫ КЛАВИАТУРЫ ====================
-
--- 1. Цикл вращения Fling (RenderStepped)
-RunService.RenderStepped:Connect(function(dt)
-    if not isFlingEnabled then return end
-    
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    
-    if root and root:IsA("BasePart") then
-        -- Отключаем авто-поворот только во время вращения, чтобы можно было ходить боком
-        if humanoid and humanoid.AutoRotate then humanoid.AutoRotate = false end
-        root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(flingSpeed) * dt, 0)
-    end
-end)
-
--- 2. Отслеживание клавиш (K — для Fling, V — для Телепорта вперед)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end -- Игнорируем, если игрок пишет в чат
-
-    -- Нажатие на K (Переключатель вращения)
-    if input.KeyCode == Enum.KeyCode.K then
-        isFlingEnabled = not isFlingEnabled
-        print("Fling Status: ", isFlingEnabled)
-        
-        -- Если выключили вращение, возвращаем персонажу стандартный автоповорот
-        if not isFlingEnabled then
-            local character = player.Character
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            if humanoid then humanoid.AutoRotate = true end
-        end
-    end
-
-    -- Нажатие на V (Рывок/Телепорт вперед)
-    if input.KeyCode == Enum.KeyCode.V then
-        local character = player.Character
-        local root = character and character:FindFirstChild("HumanoidRootPart")
-        if root then
-            root.CFrame = root.CFrame + (root.CFrame.LookVector * currentTpDistance)
-            print("Teleported forward by: " .. tostring(currentTpDistance) .. " studs")
-        end
-    end
-end)
-
--- 3. Безопасная обработка Infinite Jump (событие создается один раз за весь запуск)
-UserInputService.JumpRequest:Connect(function()
-    if not isInfJumpEnabled then return end
-    
-    local character = player.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    end
-end)
-
-
--- ==================== ИНТЕРФЕЙС МЕНЮ KAVO UI ====================
-
--- СЕКЦИЯ MAIN
+--MAIN--
 local Main = Window.NewTab("Main")
-local Section = Main:NewSection("Player Customization")
+local Section = Main:NewSection("Player")
 
--- Слайдер Скорости
+-- Слайдер для изменения скорости ( WalkSpeed )
+-- Параметры: Название, Описание, Максимум, Минимум, Функция
 Section:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, function(value)
-    currentWalkSpeed = value
-    local character = player.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.WalkSpeed = value
-    end
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    humanoid.WalkSpeed = value
     print("Speed changed to: " .. tostring(value))
 end)
 
--- Слайдер Прыжка
+-- Слайдер для изменения силы прыжка ( JumpPower )
 Section:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, function(value)
-    currentJumpPower = value
-    local character = player.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.UseJumpPower = true
-        humanoid.JumpPower = value
-    end
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    -- Включаем использование JumpPower, если в игре использовался JumpHeight
+    humanoid.UseJumpPower = true 
+    humanoid.JumpPower = value
     print("Jump Power changed to: " .. tostring(value))
 end)
 
--- Кнопка информирования о Fling (инструкция)
-Section:NewButton("Fling | Press (K) to toggle", "Spin with 12000% power (Press K on Keyboard)", function()
-    isFlingEnabled = not isFlingEnabled
-    print("Fling triggered via menu button. Status: ", isFlingEnabled)
-    
-    if not isFlingEnabled then
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid.AutoRotate = true end
-    end
+Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
+	local Players = game:GetService("Players")
+	local UserInputService = game:GetService("UserInputService")
+	local RunService = game:GetService("RunService")
+
+	local player = Players.LocalPlayer
+
+	local rotating = false
+	local speed = 12000 -- градусов в секунду
+
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+
+		if input.KeyCode == Enum.KeyCode.K then
+			rotating = not rotating
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function(dt)
+		if not rotating then return end
+
+		local character = player.Character
+			if not character then return end
+	
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+
+		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
+	end)
 end)
 
--- Тумблер Бесконечного прыжка
-Section:NewToggle("Inf Jumps", "Jump while in the air endlessly", function(state)
-    isInfJumpEnabled = state
-    print("Infinite Jump: ", state)
-end)
+Section:NewToggle("Inf Jumps", "Jump while in the air", function(state)
+    if state then
+	    local Players = game:GetService("Players")
+	    local UserInputService = game:GetService("UserInputService")
 
--- Слайдер настройки дистанции телепорта
-Section:NewSlider("Teleport Distance (Key: V)", "Adjust forward dash distance", 250, 5, function(value)
-    currentTpDistance = value
-    print("Teleport distance set to: " .. tostring(value))
-end)
+	    local player = Players.LocalPlayer
 
+	    local infiniteJump = true
 
--- СЕКЦИЯ GAME (Спавнер лаки блоков)
-local GameTab = Window.NewTab("Game")
-local LuckySection = GameTab:NewSection("Lucky Block Spawner")
+	    UserInputService.JumpRequest:Connect(function()
+		    if not infiniteJump then
+			    return
+		    end
 
-LuckySection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUAL)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
-    -- Безопасный поиск и активация события в ReplicatedStorage
-    local replicatedStorage = game:GetService("ReplicatedStorage")
-    local remoteEvent = replicatedStorage:FindFirstChild(currentOption)
-    
-    if remoteEvent and remoteEvent:IsA("RemoteEvent") then
-        remoteEvent:FireServer()
-        print("Fired event: " .. currentOption)
+		    local character = player.Character
+		    if not character then return end
+
+		    local humanoid = character:FindFirstChildOfClass("Humanoid")
+		    if humanoid then
+			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		    end
+	    end)
     else
-        warn("RemoteEvent '" .. tostring(currentOption) .. "' не найден в ReplicatedStorage!")
+	    local Players = game:GetService("Players")
+	    local UserInputService = game:GetService("UserInputService")
+
+	    local player = Players.LocalPlayer
+
+	    local infiniteJump = false
+
+	    UserInputService.JumpRequest:Connect(function()
+		    if not infiniteJump then
+			    return
+		    end
+
+		    local character = player.Character
+		    if not character then return end
+
+		    local humanoid = character:FindFirstChildOfClass("Humanoid")
+		    if humanoid then
+			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		    end
+	    end)
     end
+end)
+
+
+local Section = Main:NewSection("Other Players")
+
+
+--Game--
+local Main = Window.NewTab("Game")
+local Section = Main:NewSection("Lucky Block Spawner")
+Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUAL)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+    local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
+    Event:FireServer()
 end)
