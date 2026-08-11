@@ -59,50 +59,49 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
-Section:NewToggle("Inf Jumps", "Jump while in the air", function(state)
-    if state then
-	    local Players = game:GetService("Players")
-	    local UserInputService = game:GetService("UserInputService")
+Section:NewButton("Inf Jumps", "Jump while mid air", function()
+	local Players = game:GetService("Players")
+	local UserInputService = game:GetService("UserInputService")
 
-	    local player = Players.LocalPlayer
+	local player = Players.LocalPlayer
 
-	    local infiniteJump = true
+	-- Меняй это значение из своего GUI:
+	local infiniteJump = true
 
-	    UserInputService.JumpRequest:Connect(function()
-		    if not infiniteJump then
-			    return
-		    end
+	UserInputService.JumpRequest:Connect(function()
+		if not infiniteJump then
+			return
+		end
 
-		    local character = player.Character
-		    if not character then return end
+		local character = player.Character
+		if not character then return end
 
-		    local humanoid = character:FindFirstChildOfClass("Humanoid")
-		    if humanoid then
-			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-		    end
-	    end)
-    else
-	    local Players = game:GetService("Players")
-	    local UserInputService = game:GetService("UserInputService")
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end)
+end)
+Section:NewButton("Teleport|(V)", "Teleports you in your direction", function()
+	local Players = game:GetService("Players")
+	local UserInputService = game:GetService("UserInputService")
 
-	    local player = Players.LocalPlayer
+	local player = Players.LocalPlayer
+	local distance = 25
 
-	    local infiniteJump = false
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
 
-	    UserInputService.JumpRequest:Connect(function()
-		    if not infiniteJump then
-			    return
-		    end
+		if input.KeyCode == Enum.KeyCode.V then
+			local character = player.Character
+			if not character then return end
 
-		    local character = player.Character
-		    if not character then return end
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if not root then return end
 
-		    local humanoid = character:FindFirstChildOfClass("Humanoid")
-		    if humanoid then
-			    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-		    end
-	    end)
-    end
+			root.CFrame = root.CFrame + root.CFrame.LookVector * distance
+		end
+	end)
 end)
 
 
