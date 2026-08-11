@@ -59,7 +59,6 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
-
 Section:NewToggle("Inf Jumps", "Jump while in the air", function(state)
     if state then
 	    local Players = game:GetService("Players")
@@ -107,13 +106,10 @@ Section:NewToggle("Inf Jumps", "Jump while in the air", function(state)
 end)
 
 
-local Section = Main:NewSection("Other Players")
-
-
 --Game--
 local Main = Window.NewTab("Game")
 local Section = Main:NewSection("Lucky Block Spawner")
-Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUAL)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
     local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
     Event:FireServer()
 end)
