@@ -1,0 +1,70 @@
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+
+local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
+
+--MAIN--
+local Main = Window.NewTab("Main")
+local Section = Main:NewSection("Player")
+
+-- Слайдер для изменения скорости ( WalkSpeed )
+-- Параметры: Название, Описание, Максимум, Минимум, Функция
+Section:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, function(value)
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    humanoid.WalkSpeed = value
+    print("Speed changed to: " .. tostring(value))
+end)
+
+-- Слайдер для изменения силы прыжка ( JumpPower )
+Section:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, function(value)
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    -- Включаем использование JumpPower, если в игре использовался JumpHeight
+    humanoid.UseJumpPower = true 
+    humanoid.JumpPower = value
+    print("Jump Power changed to: " .. tostring(value))
+end)
+
+Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
+	local Players = game:GetService("Players")
+	local UserInputService = game:GetService("UserInputService")
+	local RunService = game:GetService("RunService")
+
+	local player = Players.LocalPlayer
+
+	local rotating = false
+	local speed = 12000 -- градусов в секунду
+
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+
+		if input.KeyCode == Enum.KeyCode.K then
+			rotating = not rotating
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function(dt)
+		if not rotating then return end
+
+		local character = player.Character
+			if not character then return end
+	
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+
+		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
+	end)
+end)
+
+
+--Game--
+local Main = Window.NewTab("Game")
+local Section = Main:NewSection("Lucky Block Spawner")
+Section:NewDropdown("DropdownText", "DropdownInf", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+    local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
+    Event:FireServer()
+end)
