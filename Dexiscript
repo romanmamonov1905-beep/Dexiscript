@@ -59,6 +59,29 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
+Section:NewButton("Infinite Jumps", "Jump While in the AIR", function()
+	local Players = game:GetService("Players")
+	local UserInputService = game:GetService("UserInputService")
+
+	local player = Players.LocalPlayer
+
+	-- Меняй это значение из своего GUI:
+	local infiniteJump = true
+
+	UserInputService.JumpRequest:Connect(function()
+		if not infiniteJump then
+			return
+		end
+
+		local character = player.Character
+		if not character then return end
+
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end)
+end)
 
 
 --Game--
