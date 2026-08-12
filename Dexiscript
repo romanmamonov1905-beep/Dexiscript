@@ -112,8 +112,8 @@ end)
 
 
 --Visual--
-local VisualTab = Window.NewTab("VisualTab")
-local VisualSection = VisualTab:NewSection("Main Visuals")
+local VTab = Window.NewTab("VisualTab")
+local VisualSection = VTab:NewSection("Main Visuals")
 
 	local Players = game:GetService("Players")
 	local RunService = game:GetService("RunService")
@@ -631,8 +631,8 @@ end)
 
 
 --Credits--
-local CreditsTab = Window.NewTab("Credits")
-local CreditsSection = CreditsTab:NewSection("Creator")
+local CTab = Window.NewTab("Credits")
+local CreditsSection = CTab:NewSection("Creator")
 
 CreditsSection:NewLabel("By Dexi | romathisisi")
 CreditsSection:NewLabel("Supported games: Lucky Blocks Battlegrounds")
