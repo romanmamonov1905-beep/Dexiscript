@@ -575,7 +575,7 @@ local VisualSection = VisualTab:NewSection("Main Visuals")
 
 --Credits--
 local Tab = Window.NewTab("Credits")
-local PlayerSection = Main:NewSection("Creator")
+local Section = Tab:NewSection("Creator")
 
 Section:NewLabel("By Dexi | romathisisi")
 Section:NewLabel("Supported games: Lucky Blocks Battlegrounds")
