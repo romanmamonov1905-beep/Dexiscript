@@ -37,7 +37,7 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 	local player = Players.LocalPlayer
 
 	local rotating = false
-	local speed = 12000 -- градусов в секунду
+	local speed = 24000 -- градусов в секунду
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
@@ -110,7 +110,7 @@ Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", 
 end)
 
 
---Game--
+--Visual--
 local Main = Window.NewTab("Visuals")
 local Section = Main:NewSection("Main Visuals")
 
@@ -193,5 +193,89 @@ local Section = Main:NewSection("Main Visuals")
 			-- 2. Мгновенно очищаем всю нашу изолированную папку (все кубы исчезнут разом)
 			espFolder:ClearAllChildren()
 			print("Player ESP: ДЕАКТИВИРОВАН И ОЧИЩЕН")
+		end
+	end)
+
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+
+	local player = Players.LocalPlayer
+	local invisibilityConnection = nil
+	local cloneModel = nil
+
+	-- Создаем тумблер (Toggle) в вашем Kavo UI
+	Section:NewToggle("Invisibility", "Makes your character invisible to others", function(state)
+		local character = player.Character
+		if not character then return end
+		
+		local root = character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not root or not humanoid then return end
+
+		if state then
+			-- === КОД ВКЛЮЧЕНИЯ (state = true) ===
+			-- Создаем локальный клон персонажа, чтобы вы видели себя
+			character.Archivable = true
+			cloneModel = character:Clone()
+			cloneModel.Name = "LocalGhost"
+			
+			-- Делаем клон полупрозрачным призраком
+			for _, part in pairs(cloneModel:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Transparency = 0.5
+					part.CanCollide = false
+				elseif part:IsA("Decal") then
+					part.Transparency = 0.5
+				end
+			end
+			
+			cloneModel.Parent = workspace
+			character.Archivable = false
+
+			-- Прячем настоящий оригинал тела от других игроков на сервере
+			for _, part in pairs(character:GetDescendants()) do
+				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+					part.Transparency = 1
+				elseif part:IsA("Decal") then
+					part.Transparency = 1
+				end
+			end
+
+			-- Синхронизируем движения призрака с вашим невидимым телом
+			invisibilityConnection = RunService.RenderStepped:Connect(function()
+				if character and cloneModel and root then
+					local ghostRoot = cloneModel:FindFirstChild("HumanoidRootPart")
+					if ghostRoot then
+						ghostRoot.CFrame = root.CFrame
+					end
+				end
+			end)
+			print("Invisibility: ON")
+		else
+			-- === КОД ВЫКЛЮЧЕНИЯ (state = false) ===
+			-- 1. Полностью останавливаем цикл синхронизации
+			if invisibilityConnection then
+				invisibilityConnection:Disconnect()
+				invisibilityConnection = nil
+			end
+
+			-- 2. Удаляем клон-призрак с карты
+			if cloneModel then
+				cloneModel:Destroy()
+				cloneModel = nil
+			end
+
+			-- 3. Возвращаем полную видимость вашему настоящему персонажу
+			for _, part in pairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Transparency = 0
+				elseif part:IsA("Decal") then
+					part.Transparency = 0
+				end
+			end
+			
+			-- Технический корень хитбокса всегда должен оставаться невидимым в Roblox
+			if root then root.Transparency = 1 end
+			print("Invisibility: OFF")
 		end
 	end)
