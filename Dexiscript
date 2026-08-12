@@ -109,20 +109,27 @@ end)
 
 	local localPlayer = Players.LocalPlayer
 	
-	-- ВАЖНО: Эта переменная ОБЯЗАТЕЛЬНО должна стоять СНАРУЖИ тумблера, в самом верху секции
+	-- Создаем или находим скрытую техническую папку в Workspace для хранения кубов нашего ESP
+	local espFolder = workspace:FindFirstChild("Dexi_PlayerESP_Folder")
+	if not espFolder then
+		espFolder = Instance.new("Folder")
+		espFolder.Name = "Dexi_PlayerESP_Folder"
+		espFolder.Parent = workspace
+	end
+
+	-- Переменная для контроля бесконечного цикла (должна быть строго СНАРУЖИ тумблера)
 	local playerEspConnection = nil 
 
 	-- Создаем тумблер в Kavo UI
 	Section:NewToggle("Player ESP", "Toggle red parts on players", function(state)
 		if state then
 			-- === КОД ВКЛЮЧЕНИЯ ===
-			-- Защита: если цикл уже почему-то работал, сначала отключаем его
 			if playerEspConnection then
 				playerEspConnection:Disconnect()
 				playerEspConnection = nil
 			end
 
-			-- Запускаем бесконечный цикл подсветки
+			-- Запускаем цикл отрисовки
 			playerEspConnection = RunService.RenderStepped:Connect(function()
 				for _, targetPlayer in pairs(Players:GetPlayers()) do
 					if targetPlayer ~= localPlayer and targetPlayer.Character then
@@ -130,52 +137,55 @@ end)
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						
 						if rootPart and rootPart:IsA("BasePart") then
-							local espPart = rootPart:FindFirstChild("EspRedPart")
+							-- Ищем куб по уникальному имени (имя игрока + суффикс) внутри нашей изолированной папки
+							local espPart = espFolder:FindFirstChild(targetPlayer.Name .. "_ESP")
 							
 							if not espPart then
+								-- Создаем красный неоновый блок
 								espPart = Instance.new("Part")
-								espPart.Name = "EspRedPart"
-								espPart.Size = Vector3.new(4, 6, 4)
+								espPart.Name = targetPlayer.Name .. "_ESP"
+								espPart.Size = Vector3.new(4, 6, 4) -- Полностью покрывает хитбокс
 								espPart.Color = Color3.fromRGB(255, 0, 0)
 								espPart.Transparency = 0.5
 								espPart.Material = Enum.Material.Neon
 								
+								-- Строгие настройки физики, чтобы блоки не падали и не толкались
 								espPart.CanCollide = false
 								espPart.Anchored = true
 								espPart.CastShadow = false
 								
-								espPart.Parent = rootPart
+								espPart.Parent = espFolder
 							end
 							
+							-- Привязываем координаты куба к позиции игрока
 							espPart.CFrame = rootPart.CFrame
 						end
 					end
 				end
+				
+				-- Авто-очистка: если игрок вышел с сервера, удаляем его куб из нашей папки
+				for _, child in pairs(espFolder:GetChildren()) do
+					local pName = child.Name:gsub("_ESP", "")
+					if not Players:FindFirstChild(pName) then
+						child:Destroy()
+					end
+				end
 			end)
-			print("Player ESP: ON")
+			print("Player ESP: АКТИВИРОВАН")
 		else
 			-- === КОД ВЫКЛЮЧЕНИЯ ===
-			-- 1. Гарантированно ломаем цикл в памяти игры
+			-- 1. Полностью разрываем и убиваем фоновый цикл в памяти
 			if playerEspConnection then
 				playerEspConnection:Disconnect()
 				playerEspConnection = nil
 			end
 
-			-- 2. Стираем все оставшиеся красные кубы со всех игроков
-			for _, targetPlayer in pairs(Players:GetPlayers()) do
-				if targetPlayer.Character then
-					local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-					if rootPart then
-						local espPart = rootPart:FindFirstChild("EspRedPart")
-						if espPart then
-							espPart:Destroy()
-						end
-					end
-				end
-			end
-			print("Player ESP: OFF")
+			-- 2. Мгновенно очищаем всю нашу изолированную папку (все кубы исчезнут разом)
+			espFolder:ClearAllChildren()
+			print("Player ESP: ДЕАКТИВИРОВАН И ОЧИЩЕН")
 		end
 	end)
+
 
 
 
