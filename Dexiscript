@@ -571,3 +571,12 @@ local VisualSection = VisualTab:NewSection("Main Visuals")
 		clickDelay = 1 / value
 		print("Click Delay set to:", clickDelay)
 	end)
+
+
+--Credits--
+local Tab = Window.NewTab("Credits")
+local PlayerSection = Main:NewSection("Creator")
+
+Section:NewLabel("By Dexi | romathisisi")
+Section:NewLabel("Supported games: Lucky Blocks Battlegrounds")
+Section:NewLabel("Have Fun XD")
