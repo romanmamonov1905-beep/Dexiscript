@@ -1,10 +1,11 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 
-local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
+local Window = Library.CreateLib("Test", "Ocean")
 
 --MAIN--
-local Main = Window:NewTab("Main")
+local Main = Window:NewTab("TEST123")
 local PlayerSection = Main:NewSection("Player")
+
 
 -- Слайдер для изменения скорости ( WalkSpeed )
 -- Параметры: Название, Описание, Максимум, Минимум, Функция
