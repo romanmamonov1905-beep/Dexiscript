@@ -634,7 +634,7 @@ TpSection:NewButton("Teleport to VoidGiver", "TP To the center", function()
     local character = game.Players.LocalPlayer.Character
 
     if character and target then
-        character:PivotTo(target.CFrame + Vector3.new(0, -5, 0))
+        character:PivotTo(target.CFrame + Vector3.new(0, 10, 0))
     end
 end)
 
