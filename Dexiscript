@@ -573,6 +573,62 @@ local VisualSection = VisualTab:NewSection("Main Visuals")
 	end)
 
 
+--Teleports--
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local TpTab = Window:NewTab("Teleport")
+local TpSection1 = TpTab:NewSection("Players")
+
+local selectedPlayer
+
+local function getPlayers()
+    local list = {}
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(list, player.Name)
+        end
+    end
+
+    return list
+end
+
+local Dropdown = Section:NewDropdown("Выбрать игрока", "Выберите игрока", getPlayers(), function(name)
+    selectedPlayer = Players:FindFirstChild(name)
+end)
+
+Section:NewButton("Телепортироваться", "Переместиться к выбранному игроку", function()
+    if not selectedPlayer then
+        return
+    end
+
+    local character = LocalPlayer.Character
+    local targetCharacter = selectedPlayer.Character
+
+    if character and targetCharacter then
+        local myRoot = character:FindFirstChild("HumanoidRootPart")
+        local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+
+        if myRoot and targetRoot then
+            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+        end
+    end
+end)
+
+Players.PlayerAdded:Connect(function()
+    Dropdown:Refresh(getPlayers(), true)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if selectedPlayer == player then
+        selectedPlayer = nil
+    end
+
+    Dropdown:Refresh(getPlayers(), true)
+end)
+
+
 --Credits--
 local CreditsTab = Window.NewTab("Credits")
 local CreditsSection = CreditsTab:NewSection("Creator")
