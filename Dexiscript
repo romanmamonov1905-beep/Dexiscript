@@ -196,6 +196,175 @@ local Section = Main:NewSection("Main Visuals")
 		end
 	end)
 
+		local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local Lighting = game:GetService("Lighting")
+
+	local localPlayer = Players.LocalPlayer
+	local camera = workspace.CurrentCamera
+
+	-- Глобальные переменные контроля (ОБЯЗАТЕЛЬНО должны стоять выше тумблеров)
+	local tracersEnabled = false
+	local toolEspEnabled = false
+	local fullBrightEnabled = false
+
+	-- Папка для хранения физических кубов подсветки оружия (изолированная архитектура)
+	local toolEspFolder = workspace:FindFirstChild("Dexi_ToolESP_Folder")
+	if not toolEspFolder then
+		toolEspFolder = Instance.new("Folder")
+		toolEspFolder.Name = "Dexi_ToolESP_Folder"
+		toolEspFolder.Parent = workspace
+	end
+
+	-- Таблица для хранения линий трасеров
+	local tracersTable = {}
+
+	-- Сохраняем стандартные настройки графики игры, чтобы вернуть их при выключении FullBright
+	local origAmbient = Lighting.Ambient
+	local origOutdoorAmbient = Lighting.OutdoorAmbient
+	local origBrightness = Lighting.Brightness
+	local origClockTime = Lighting.ClockTime
+
+	-- ЕДИНЫЙ фоновый цикл для отрисовки Трасеров и Оружия
+	RunService.RenderStepped:Connect(function()
+		-- --- 1. ЛОГИКА ТРАСЕРОВ ---
+		if tracersEnabled then
+			for _, targetPlayer in pairs(Players:GetPlayers()) do
+				if targetPlayer ~= localPlayer and targetPlayer.Character then
+					local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+					
+					if rootPart then
+						-- Переводим 3D координаты игрока в 2D координаты экрана камеры
+						local screenPos, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+						
+						if onScreen then
+							-- Если линии для этого игрока еще нет, создаем её через встроенные Drawing (CoreGui)
+							local line = tracersTable[targetPlayer.Name]
+							if not line then
+								line = Drawing.new("Line")
+								line.Thickness = 1.5
+								line.Color = Color3.fromRGB(255, 0, 0) -- Красный цвет линий
+								line.Transparency = 0.7
+								tracersTable[targetPlayer.Name] = line
+							end
+							
+							-- Точка старта линии — центр нижней части экрана
+							line.From = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+							-- Точка конца линии — координаты хитбокса врага
+							line.To = Vector2.new(screenPos.X, screenPos.Y)
+							line.Visible = true
+						else
+							if tracersTable[targetPlayer.Name] then tracersTable[targetPlayer.Name].Visible = false end
+						end
+					end
+				end
+			end
+		else
+			-- Очистка всех трасеров при выключении
+			for name, line in pairs(tracersTable) do
+				line.Visible = false
+				line:Remove()
+				tracersTable[name] = nil
+			end
+		end
+
+		-- --- 2. ЛОГИКА ПОДСВЕТКИ ОРУЖИЯ (TOOLS) ---
+		if toolEspEnabled then
+			for _, object in pairs(workspace:GetDescendants()) do
+				if object:IsA("Tool") then
+					-- Проверяем, что оружие просто лежит на земле, а не находится в руках игрока
+					local isEquipped = object:FindFirstAncestorOfClass("Model") and object.Parent:FindFirstChildOfClass("Humanoid")
+					
+					if not isEquipped then
+						local handle = object:FindFirstChild("Handle") or object:FindFirstChildWhichIsA("BasePart")
+						if handle and handle:IsA("BasePart") then
+							-- Создаем уникальный ID для куба на основе адреса памяти оружия
+							local cubeName = tostring(object) .. "_Cube"
+							local toolCube = toolEspFolder:FindFirstChild(cubeName)
+							
+							if not toolCube then
+								toolCube = Instance.new("Part")
+								toolCube.Name = cubeName
+								toolCube.Size = handle.Size + Vector3.new(0.6, 0.6, 0.6)
+								toolCube.Color = Color3.fromRGB(0, 150, 255) -- Ярко-синий цвет предметов
+								toolCube.Transparency = 0.5
+								toolCube.Material = Enum.Material.Neon
+								
+								toolCube.CanCollide = false
+								toolCube.Anchored = true
+								toolCube.CastShadow = false
+								
+								toolCube.Parent = toolEspFolder
+							end
+							toolCube.CFrame = handle.CFrame
+						end
+					end
+				end
+			end
+			
+			-- Очистка синих кубов, если предмет удалили с карты (кто-то подобрал или он деспавнился)
+			for _, cube in pairs(toolEspFolder:GetChildren()) do
+				local originalName = cube.Name:gsub("_Cube", "")
+				local found = false
+				for _, obj in pairs(workspace:GetDescendants()) do
+					if obj:IsA("Tool") and tostring(obj) == originalName then
+						local isEquipped = obj:FindFirstAncestorOfClass("Model") and obj.Parent:FindFirstChildOfClass("Humanoid")
+						if not isEquipped then found = true break end
+					end
+				end
+				if not found then cube:Destroy() end
+			end
+		else
+			toolEspFolder:ClearAllChildren()
+		end
+
+		-- --- 3. ЛОГИКА FULLBRIGHT (НОЧНОЕ ЗРЕНИЕ) ---
+		if fullBrightEnabled then
+			Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+			Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+			Lighting.Brightness = 3
+			Lighting.ClockTime = 14 -- Всегда солнечный день
+		end
+	end)
+
+	-- Авто-очистка трасеров, если игрок ливнул
+	Players.PlayerRemoving:Connect(function(targetPlayer)
+		if tracersTable[targetPlayer.Name] then
+			tracersTable[targetPlayer.Name].Visible = false
+			tracersTable[targetPlayer.Name]:Remove()
+			tracersTable[targetPlayer.Name] = nil
+		end
+	end)
+
+
+	-- ==================== СОЗДАНИЕ ТУМБЛЕРОВ В KAVO UI ====================
+
+	-- 1. Тумблер Трасеров (Линий к игрокам)
+	Section:NewToggle("Player Tracers", "Draws laser lines to all players", function(state)
+		tracersEnabled = state
+		print("Tracers status:", state)
+	end)
+
+	-- 2. Тумблер подсветки Оружия
+	Section:NewToggle("Item & Tool ESP", "Spawns a blue glow on dropped items", function(state)
+		toolEspEnabled = state
+		print("Tool ESP status:", state)
+	end)
+
+	-- 3. Тумблер Ночного зрения
+	Section:NewToggle("FullBright", "Disables darkness and shadows", function(state)
+		fullBrightEnabled = state
+		if not state then
+			-- Когда выключаем, принудительно возвращаем оригинальную графику карты обратно
+			Lighting.Ambient = origAmbient
+			Lighting.OutdoorAmbient = origOutdoorAmbient
+			Lighting.Brightness = origBrightness
+			Lighting.ClockTime = origClockTime
+		end
+		print("FullBright status:", state)
+	end)
+
+
 	local Players = game:GetService("Players")
 
 	local player = Players.LocalPlayer
