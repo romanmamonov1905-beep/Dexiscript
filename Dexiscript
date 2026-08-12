@@ -104,6 +104,80 @@ Section:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	end)
 end)
 
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+
+	local localPlayer = Players.LocalPlayer
+	
+	-- ВАЖНО: Эта переменная ОБЯЗАТЕЛЬНО должна стоять СНАРУЖИ тумблера, в самом верху секции
+	local playerEspConnection = nil 
+
+	-- Создаем тумблер в Kavo UI
+	Section:NewToggle("Player ESP", "Toggle red parts on players", function(state)
+		if state then
+			-- === КОД ВКЛЮЧЕНИЯ ===
+			-- Защита: если цикл уже почему-то работал, сначала отключаем его
+			if playerEspConnection then
+				playerEspConnection:Disconnect()
+				playerEspConnection = nil
+			end
+
+			-- Запускаем бесконечный цикл подсветки
+			playerEspConnection = RunService.RenderStepped:Connect(function()
+				for _, targetPlayer in pairs(Players:GetPlayers()) do
+					if targetPlayer ~= localPlayer and targetPlayer.Character then
+						local character = targetPlayer.Character
+						local rootPart = character:FindFirstChild("HumanoidRootPart")
+						
+						if rootPart and rootPart:IsA("BasePart") then
+							local espPart = rootPart:FindFirstChild("EspRedPart")
+							
+							if not espPart then
+								espPart = Instance.new("Part")
+								espPart.Name = "EspRedPart"
+								espPart.Size = Vector3.new(4, 6, 4)
+								espPart.Color = Color3.fromRGB(255, 0, 0)
+								espPart.Transparency = 0.5
+								espPart.Material = Enum.Material.Neon
+								
+								espPart.CanCollide = false
+								espPart.Anchored = true
+								espPart.CastShadow = false
+								
+								espPart.Parent = rootPart
+							end
+							
+							espPart.CFrame = rootPart.CFrame
+						end
+					end
+				end
+			end)
+			print("Player ESP: ON")
+		else
+			-- === КОД ВЫКЛЮЧЕНИЯ ===
+			-- 1. Гарантированно ломаем цикл в памяти игры
+			if playerEspConnection then
+				playerEspConnection:Disconnect()
+				playerEspConnection = nil
+			end
+
+			-- 2. Стираем все оставшиеся красные кубы со всех игроков
+			for _, targetPlayer in pairs(Players:GetPlayers()) do
+				if targetPlayer.Character then
+					local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+					if rootPart then
+						local espPart = rootPart:FindFirstChild("EspRedPart")
+						if espPart then
+							espPart:Destroy()
+						end
+					end
+				end
+			end
+			print("Player ESP: OFF")
+		end
+	end)
+
+
 
 --Game--
 local Main = Window.NewTab("Game")
