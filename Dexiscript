@@ -127,7 +127,7 @@ end
 updatePlayerList()
 
 -- Создание выпадающего меню (Dropdown)
-local PlayerDropdown = Section:NewDropdown("Teleport", "TP To any player on the server", playerList, function(currentOption)
+Section:NewDropdown("Teleport", "TP To any player on the server", playerList, function(currentOption)
     selectedPlayerName = currentOption
 end)
 
