@@ -381,42 +381,62 @@ local VisualSection = VisualTab:NewSection("Main Visuals")
 	local isInvisible = false
 	local savedCharacterCFrame = nil
 
-	-- Создаем тумблер (Toggle) в вашем Kavo UI
-	VisualSection:NewToggle("Invisibility (FE Bypass)", "Makes you invisible to other players", function(state)
-		isInvisible = state
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		local root = character and character:FindFirstChild("HumanoidRootPart")
+	local Players = game:GetService("Players")
 
-		if not character or not humanoid or not root then return end
+	local player = Players.LocalPlayer
+	local localHighlight = nil
+
+	-- Создаем тумблер (Toggle) в вашем Kavo UI
+	VisualSection:NewToggle("Invisibility", "Makes your character invisible", function(state)
+		local character = player.Character
+		if not character then return end
+		
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if not root then return end
 
 		if state then
-			-- === КОД ВКЛЮЧЕНИЯ (Для всех вы исчезаете) ===
-			savedCharacterCFrame = root.CFrame
-			
-			-- Находим сустав шеи или поясницы (работает как для R6, так и для R15 персонажей)
-			local lowerTorso = character:FindFirstChild("LowerTorso")
-			local neck = character:FindFirstChild("Head") and character.Head:FindFirstChild("Neck")
-			local waist = lowerTorso and character:FindFirstChild("UpperTorso") and character.UpperTorso:FindFirstChild("Waist")
-			
-			-- Ломаем соединение сустава. Сервер думает, что персонаж сломался, и скрывает его
-			if waist then
-				waist:Destroy()
-			elseif neck then
-				neck:Destroy()
+			-- === КОД ВКЛЮЧЕНИЯ ===
+			-- 1. Полностью скрываем настоящее тело от других игроков на сервере
+			for _, part in pairs(character:GetDescendants()) do
+				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+					part.Transparency = 1
+				elseif part:IsA("Decal") then
+					part.Transparency = 1
+				end
 			end
-			
-			-- Сдвигаем локальный хитбокс вниз, чтобы сервер потерял нас из виду
-			root.CFrame = root.CFrame * CFrame.new(0, -25, 0)
-			
-			print("Invisibility: ON (Server Bypassed)")
+
+			-- 2. Создаем локальную подсветку-силуэт (Highlight) только для ваших глаз
+			if not localHighlight then
+				localHighlight = Instance.new("Highlight")
+				localHighlight.Name = "LocalGhostHighlight"
+				localHighlight.FillColor = Color3.fromRGB(0, 150, 255) -- Синеватый неоновый призрак
+				localHighlight.FillTransparency = 0.6 -- Прозрачность тела
+				localHighlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Белая аккуратная обводка
+				localHighlight.OutlineTransparency = 0.2
+				localHighlight.Adornee = character
+				localHighlight.Parent = character
+			end
+			print("Invisibility: ON (No-Clone Method)")
 		else
-			-- === КОД ВЫКЛЮЧЕНИЯ (Возвращаем персонажа) ===
-			-- Чтобы вернуть суставы на место и снова стать видимым, в Roblox нужно обновить персонажа (убить его)
-			if humanoid then
-				humanoid.Health = 0 -- Персонаж возродится полностью видимым и с целыми суставами
+			-- === КОД ВЫКЛЮЧЕНИЯ ===
+			-- 1. Уничтожаем подсветку призрака
+			if localHighlight then
+				localHighlight:Destroy()
+				localHighlight = nil
 			end
-			print("Invisibility: OFF (Character Reseted)")
+
+			-- 2. Возвращаем стандартную видимость вашему настоящему персонажу
+			for _, part in pairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Transparency = 0
+				elseif part:IsA("Decal") then
+					part.Transparency = 0
+				end
+			end
+			
+			-- Технический хитбокс должен снова стать невидимым
+			if root then root.Transparency = 1 end
+			print("Invisibility: OFF")
 		end
 	end)
 
