@@ -2,6 +2,9 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHept
 
 local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
 
+Library:ToggleUI(Enum.KeyCode.RightShift) 
+
+
 --MAIN--
 local Main = Window.NewTab("Main")
 local PlayerSection = Main:NewSection("Player")
