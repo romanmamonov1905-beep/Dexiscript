@@ -82,7 +82,7 @@ PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
 		end
 	end)
 end)
-PlayerSection:NewButton("Dash|(V)", "Teleports you in your direction", function()
+PlayerSection:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
@@ -102,55 +102,6 @@ PlayerSection:NewButton("Dash|(V)", "Teleports you in your direction", function(
 			root.CFrame = root.CFrame + root.CFrame.LookVector * distance
 		end
 	end)
-end)
-
--- Переменные для хранения состояния
-local selectedPlayerName = ""
-local playerList = {}
-
--- Сервисы Roblox
-local Players = game:GetService("Players")
-local localPlayer = Players.LocalPlayer
-
--- Функция для обновления списка игроков на сервере
-local function updatePlayerList()
-    playerList = {}
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= localPlayer then -- Исключаем себя из списка
-            table.insert(playerList, p.Name)
-        end
-    end
-    return playerList
-end
-
--- Инициализируем первоначальный список игроков
-updatePlayerList()
-
--- Создание выпадающего меню (Dropdown)
-Section:NewDropdown("Teleport", "TP To any player on the server", playerList, function(currentOption)
-    selectedPlayerName = currentOption
-end)
-
--- Кнопка для выполнения телепортации
-Section:NewButton("Телепортироваться", "Перемещает вас к выбранному игроку", function()
-    if selectedPlayerName == "" then return end
-    
-    local targetPlayer = Players:FindFirstChild(selectedPlayerName)
-    if targetPlayer and targetPlayer.Character then
-        local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-        
-        if targetRoot and myRoot then
-            -- Телепортируем немного выше игрока (+3 studs), чтобы не застрять
-            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 3, 0)
-        end
-    end
-end)
-
--- Кнопка обновления списка (если кто-то зашел или вышел)
-Section:NewButton("Обновить список игроков", "Обновляет список никнеймов в меню", function()
-    local refreshedList = updatePlayerList()
-    PlayerDropdown:Refresh(refreshedList)
 end)
 
 PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
