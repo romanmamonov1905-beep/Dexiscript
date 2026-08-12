@@ -213,17 +213,33 @@ local Section = Main:NewSection("Main Visuals")
 		if not root or not humanoid then return end
 
 		if state then
-			-- === КОД ВКЛЮЧЕНИЯ (state = true) ===
-			-- Создаем локальный клон персонажа, чтобы вы видели себя
+			-- === КОД ВКЛЮЧЕНИЯ ===
 			character.Archivable = true
 			cloneModel = character:Clone()
 			cloneModel.Name = "LocalGhost"
 			
-			-- Делаем клон полупрозрачным призраком
+			-- Полностью зачищаем физику призрака, чтобы убрать тряску и дёрганье
+			local ghostHumanoid = cloneModel:FindFirstChildOfClass("Humanoid")
+			if ghostHumanoid then
+				ghostHumanoid.PlatformStand = true -- Отключаем физическое управление гуманоида
+				ghostHumanoid:Destroy() -- Удаляем гуманоид, чтобы он не конфликтовал с оригиналом
+			end
+
+			-- Удаляем скрипты анимаций и звуков внутри призрака
+			for _, obj in pairs(cloneModel:GetDescendants()) do
+				if obj:IsA("LocalScript") or obj:IsA("Script") or obj:IsA("Animate") or obj:IsA("Sound") then
+					obj:Destroy()
+				end
+			end
+			
+			-- Настраиваем детали призрака (делаем прозрачными, отключаем массу и коллизию)
 			for _, part in pairs(cloneModel:GetDescendants()) do
 				if part:IsA("BasePart") then
 					part.Transparency = 0.5
-					part.CanCollide = false
+					part.CanCollide = false -- Гарантирует, что детали не будут толкать оригинал
+					part.CanTouch = false
+					part.CanQuery = false
+					part.Massless = true -- Убираем вес у призрака, чтобы он не тянул назад
 				elseif part:IsA("Decal") then
 					part.Transparency = 0.5
 				end
@@ -241,31 +257,30 @@ local Section = Main:NewSection("Main Visuals")
 				end
 			end
 
-			-- Синхронизируем движения призрака с вашим невидимым телом
+			-- Идеальная плавная привязка координат без физического трения
 			invisibilityConnection = RunService.RenderStepped:Connect(function()
 				if character and cloneModel and root then
 					local ghostRoot = cloneModel:FindFirstChild("HumanoidRootPart")
 					if ghostRoot then
+						-- Переносим только визуальные координаты CFrame
 						ghostRoot.CFrame = root.CFrame
 					end
 				end
 			end)
-			print("Invisibility: ON")
+			print("Invisibility: ON (Physics Cleared)")
 		else
-			-- === КОД ВЫКЛЮЧЕНИЯ (state = false) ===
-			-- 1. Полностью останавливаем цикл синхронизации
+			-- === КОД ВЫКЛЮЧЕНИЯ ===
 			if invisibilityConnection then
 				invisibilityConnection:Disconnect()
 				invisibilityConnection = nil
 			end
 
-			-- 2. Удаляем клон-призрак с карты
 			if cloneModel then
 				cloneModel:Destroy()
 				cloneModel = nil
 			end
 
-			-- 3. Возвращаем полную видимость вашему настоящему персонажу
+			-- Возвращаем видимость настоящему персонажу
 			for _, part in pairs(character:GetDescendants()) do
 				if part:IsA("BasePart") then
 					part.Transparency = 0
@@ -274,7 +289,6 @@ local Section = Main:NewSection("Main Visuals")
 				end
 			end
 			
-			-- Технический корень хитбокса всегда должен оставаться невидимым в Roblox
 			if root then root.Transparency = 1 end
 			print("Invisibility: OFF")
 		end
