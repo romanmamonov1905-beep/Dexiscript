@@ -3,7 +3,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHept
 local Window = Library.CreateLib("Test", "Ocean")
 
 --MAIN--
-local Main = Window:NewTab("TEST123")
+local Main = Window:NewTab("MainTab")
 local PlayerSection = Main:NewSection("Player")
 
 
@@ -112,7 +112,7 @@ end)
 
 
 --Visual--
-local VisualTab = Window.NewTab("Visuals")
+local VisualTab = Window.NewTab("VisualTab")
 local VisualSection = VisualTab:NewSection("Main Visuals")
 
 	local Players = game:GetService("Players")
