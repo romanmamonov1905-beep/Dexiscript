@@ -4,7 +4,7 @@ local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
 
 --MAIN--
 local Main = Window.NewTab("Main")
-local PlayerSection = Main:NewSection("Player")
+local PlayerSection = Main:NewSection("Movement")
 
 -- Слайдер для изменения скорости ( WalkSpeed )
 -- Параметры: Название, Описание, Максимум, Минимум, Функция
@@ -29,7 +29,49 @@ PlayerSection:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, 
     print("Jump Power changed to: " .. tostring(value))
 end)
 
-PlayerSection:NewButton("Fling|(K)", "Spin with 12000% power", function()
+local function updatePlayerList()
+    playerList = {}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= localPlayer then -- Исключаем себя из списка
+            table.insert(playerList, p.Name)
+        end
+    end
+    return playerList
+end
+
+-- Инициализируем первоначальный список игроков
+updatePlayerList()
+
+-- Создание выпадающего меню (Dropdown)
+local PlayerDropdown = Section:NewDropdown("Выберите игрока", "Выберите никнейм для телепортации", playerList, function(currentOption)
+    selectedPlayerName = currentOption
+end)
+
+-- Кнопка для выполнения телепортации
+Section:NewButton("Телепортироваться", "Перемещает вас к выбранному игроку", function()
+    if selectedPlayerName == "" then return end
+    
+    local targetPlayer = Players:FindFirstChild(selectedPlayerName)
+    if targetPlayer and targetPlayer.Character then
+        local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        
+        if targetRoot and myRoot then
+            -- Телепортируем немного выше игрока (+3 studs), чтобы не застрять
+            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 3, 0)
+        end
+    end
+end)
+
+-- Кнопка обновления списка (если кто-то зашел или вышел)
+Section:NewButton("Обновить список игроков", "Обновляет список никнеймов в меню", function()
+    local refreshedList = updatePlayerList()
+    PlayerDropdown:Refresh(refreshedList)
+end)
+
+local PlayerSection = Main:NewSection("Player")
+
+PlayerSection:NewButton("Fling|(K)", "Spin with 100% power", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 	local RunService = game:GetService("RunService")
@@ -82,7 +124,7 @@ PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
 		end
 	end)
 end)
-PlayerSection:NewButton("Teleport|(V)", "Teleports you in your direction", function()
+PlayerSection:NewButton("Forwatd Dash|(V)", "Dashes you in your direction", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
@@ -104,9 +146,31 @@ PlayerSection:NewButton("Teleport|(V)", "Teleports you in your direction", funct
 	end)
 end)
 
+local PlayerSection = Main:NewSection("Lucky Block")
+
 PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
     local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
     Event:FireServer()
+end)
+
+Section:NewButton("Claim Void Block", "Teleports you to Void Block", function()
+	local Players = game:GetService("Players")
+	local player = Players.LocalPlayer
+
+	-- Ссылка на целевой объект
+	local target = workspace:WaitForChild("CenterBlocks"):WaitForChild("Givers"):WaitForChild("VoidGiver"):WaitForChild("Base")
+
+	-- Функция для телепортации
+	local function teleport()
+		local character = player.Character or player.CharacterAdded:Wait()
+		local rootPart = character:WaitForChild("HumanoidRootPart")
+		
+		-- Смещение по высоте (+3), чтобы персонаж не застрял внутри объекта
+		rootPart.CFrame = target.CFrame * CFrame.new(0, -10, 0)
+	end
+
+	-- Запуск телепортации
+	teleport()
 end)
 
 
