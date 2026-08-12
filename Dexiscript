@@ -4,7 +4,7 @@ local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
 
 --MAIN--
 local Main = Window.NewTab("Main")
-local PlayerSection = Main:NewSection("Movement")
+local PlayerSection = Main:NewSection("Player")
 
 -- Слайдер для изменения скорости ( WalkSpeed )
 -- Параметры: Название, Описание, Максимум, Минимум, Функция
@@ -29,9 +29,7 @@ PlayerSection:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, 
     print("Jump Power changed to: " .. tostring(value))
 end)
 
-local PlayerSection = Main:NewSection("Player")
-
-PlayerSection:NewButton("Fling|(K)", "Spin with 100% power", function()
+PlayerSection:NewButton("Fling|(K)", "Spin with 12000% power", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 	local RunService = game:GetService("RunService")
@@ -84,7 +82,7 @@ PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
 		end
 	end)
 end)
-PlayerSection:NewButton("Forwatd Dash|(V)", "Dashes you in your direction", function()
+PlayerSection:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
@@ -106,32 +104,9 @@ PlayerSection:NewButton("Forwatd Dash|(V)", "Dashes you in your direction", func
 	end)
 end)
 
-local PlayerSection = Main:NewSection("Lucky Block")
-
 PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
     local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
     Event:FireServer()
-end)
-
-Section:NewButton("Claim Void Block", "Teleports you to Void Block", function()
-	local Players = game:GetService("Players")
-	local player = Players.LocalPlayer
-
-	-- Ссылка на целевой объект
-	local target = workspace:WaitForChild("CenterBlocks"):WaitForChild("Givers"):WaitForChild("VoidGiver"):WaitForChild("Base")
-
-	-- Функция для телепортации
-	local function teleport()
-		local character = player.Character or player.CharacterAdded:Wait()
-		local rootPart = character:WaitForChild("HumanoidRootPart")
-		
-		-- Смещение по высоте (+3), чтобы персонаж не застрял внутри объекта
-		rootPart.CFrame = target.CFrame * CFrame.new(0, -10, 0)
-	end
-
-	-- Запуск телепортации
-	teleport()
-
 end)
 
 
