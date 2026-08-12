@@ -104,6 +104,16 @@ Section:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	end)
 end)
 
+Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+    local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
+    Event:FireServer()
+end)
+
+
+--Game--
+local Main = Window.NewTab("Visuals")
+local Section = Main:NewSection("Main Visuals")
+
 	local Players = game:GetService("Players")
 	local RunService = game:GetService("RunService")
 
@@ -185,14 +195,3 @@ end)
 			print("Player ESP: ДЕАКТИВИРОВАН И ОЧИЩЕН")
 		end
 	end)
-
-
-
-
---Game--
-local Main = Window.NewTab("Game")
-local Section = Main:NewSection("Lucky Block Spawner")
-Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
-    local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
-    Event:FireServer()
-end)
