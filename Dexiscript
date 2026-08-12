@@ -595,11 +595,11 @@ local function getPlayers()
     return list
 end
 
-local Dropdown = Section:NewDropdown("Выбрать игрока", "Выберите игрока", getPlayers(), function(name)
+local Dropdown = TpSection1:NewDropdown("Choose Player", "Bro omg do i REALLY need to explain?", getPlayers(), function(name)
     selectedPlayer = Players:FindFirstChild(name)
 end)
 
-Section:NewButton("Телепортироваться", "Переместиться к выбранному игроку", function()
+TpSection1:NewButton("TP", "TP To the choosen player", function()
     if not selectedPlayer then
         return
     end
