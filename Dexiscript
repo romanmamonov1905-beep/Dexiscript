@@ -4,11 +4,11 @@ local Window = Library.CreateLib("Dexi | Lucky Blocks Battleground", "Ocean")
 
 --MAIN--
 local Main = Window.NewTab("Main")
-local Section = Main:NewSection("Player")
+local PlayerSection = Main:NewSection("Player")
 
 -- Слайдер для изменения скорости ( WalkSpeed )
 -- Параметры: Название, Описание, Максимум, Минимум, Функция
-Section:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, function(value)
+PlayerSection:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, function(value)
     local player = game.Players.LocalPlayer
     local character = player.Character or player.CharacterAdded:Wait()
     local humanoid = character:WaitForChild("Humanoid")
@@ -18,7 +18,7 @@ Section:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, functio
 end)
 
 -- Слайдер для изменения силы прыжка ( JumpPower )
-Section:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, function(value)
+PlayerSection:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, function(value)
     local player = game.Players.LocalPlayer
     local character = player.Character or player.CharacterAdded:Wait()
     local humanoid = character:WaitForChild("Humanoid")
@@ -29,7 +29,7 @@ Section:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, functi
     print("Jump Power changed to: " .. tostring(value))
 end)
 
-Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
+PlayerSection:NewButton("Fling|(K)", "Spin with 12000% power", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 	local RunService = game:GetService("RunService")
@@ -59,7 +59,7 @@ Section:NewButton("Fling|(K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
-Section:NewButton("Inf Jumps", "Jump while mid air", function()
+PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
@@ -82,7 +82,7 @@ Section:NewButton("Inf Jumps", "Jump while mid air", function()
 		end
 	end)
 end)
-Section:NewButton("Teleport|(V)", "Teleports you in your direction", function()
+PlayerSection:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
 
@@ -104,15 +104,15 @@ Section:NewButton("Teleport|(V)", "Teleports you in your direction", function()
 	end)
 end)
 
-Section:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
+PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
     local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
     Event:FireServer()
 end)
 
 
 --Visual--
-local Main = Window.NewTab("Visuals")
-local Section = Main:NewSection("Main Visuals")
+local VisualTab = Window.NewTab("Visuals")
+local VisualSection = VisualTab:NewSection("Main Visuals")
 
 	local Players = game:GetService("Players")
 	local RunService = game:GetService("RunService")
@@ -131,7 +131,7 @@ local Section = Main:NewSection("Main Visuals")
 	local playerEspConnection = nil 
 
 	-- Создаем тумблер в Kavo UI
-	Section:NewToggle("Player ESP", "Toggle red parts on players", function(state)
+	VisualSection:NewToggle("Player ESP", "Toggle red parts on players", function(state)
 		if state then
 			-- === КОД ВКЛЮЧЕНИЯ ===
 			if playerEspConnection then
@@ -351,19 +351,19 @@ local Section = Main:NewSection("Main Visuals")
 	-- ==================== СВЯЗЫВАЕМ С ТУМБЛЕРАМИ KAVO UI ====================
 
 	-- 1. Тумблер Трасеров (Линий к игрокам)
-	Section:NewToggle("Player Tracers", "Draws neon beams to all players", function(state)
+	VisualSection:NewToggle("Player Tracers", "Draws neon beams to all players", function(state)
 		tracersEnabled = state
 		print("Tracers status:", state)
 	end)
 
 	-- 2. Тумблер подсветки Оружия и Блоков
-	Section:NewToggle("Item & Tool ESP", "Spawns a blue glow on dropped items/blocks", function(state)
+	VisualSection:NewToggle("Item & Tool ESP", "Spawns a blue glow on dropped items/blocks", function(state)
 		toolEspEnabled = state
 		print("Tool ESP status:", state)
 	end)
 
 	-- 3. Тумблер Ночного зрения (FullBright)
-	Section:NewToggle("FullBright", "Disables darkness and shadows", function(state)
+	VisualSection:NewToggle("FullBright", "Disables darkness and shadows", function(state)
 		fullBrightEnabled = state
 		if not state then
 			-- Когда выключаем, принудительно возвращаем оригинальную графику карты обратно
@@ -382,7 +382,7 @@ local Section = Main:NewSection("Main Visuals")
 	local savedCharacterCFrame = nil
 
 	-- Создаем тумблер (Toggle) в вашем Kavo UI
-	Section:NewToggle("Invisibility (FE Bypass)", "Makes you invisible to other players", function(state)
+	VisualSection:NewToggle("Invisibility (FE Bypass)", "Makes you invisible to other players", function(state)
 		isInvisible = state
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
