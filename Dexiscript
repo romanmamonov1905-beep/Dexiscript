@@ -420,3 +420,134 @@ local Section = Main:NewSection("Main Visuals")
 		end
 	end)
 
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local UserInputService = game:GetService("UserInputService")
+
+	local localPlayer = Players.LocalPlayer
+
+	-- Переменные контроля функций (ОБЯЗАТЕЛЬНО должны стоять выше элементов интерфейса)
+	local killAuraEnabled = false
+	local killAuraRange = 15 -- Дистанция работы Киллауры
+
+	local hitboxesEnabled = false
+	local hitboxSize = 10 -- Размер хитбокса врагов
+
+	local autoClickerEnabled = false
+	local clickDelay = 0.01 -- Задержка автокликера (чем меньше, тем быстрее)
+	local clicking = false
+
+	-- === СОЗДАНИЕ ВКЛАДКИ И СЕКЦИЙ ===
+	local CombatTab = Window.NewTab("Combat")
+	local AuraSection = CombatTab:NewSection("Kill Aura")
+	local HitboxSection = CombatTab:NewSection("Hitboxes")
+	local ClickerSection = CombatTab:NewSection("Auto Clicker")
+
+	-- --- 1. ЛОГИКА И ИНТЕРФЕЙС KILL AURA ---
+	RunService.RenderStepped:Connect(function()
+		if not killAuraEnabled then return end
+		local myChar = localPlayer.Character
+		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		-- Ищем экипированное оружие в руках (объект Tool внутри персонажа)
+		local currentTool = myChar and myChar:FindFirstChildOfClass("Tool")
+		
+		if myRoot and currentTool then
+			for _, targetPlayer in pairs(Players:GetPlayers()) do
+				if targetPlayer ~= localPlayer and targetPlayer.Character then
+					local enemyRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+					local enemyHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+					
+					-- Проверяем дистанцию до врага и жив ли он
+					if enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
+						local distance = (myRoot.Position - enemyRoot.Position).Magnitude
+						if distance <= killAuraRange then
+							-- Активируем инструмент (имитируем взмах мечом)
+							currentTool:Activate()
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	AuraSection:NewToggle("Kill Aura", "Automatically attacks nearby players if tool equipped", function(state)
+		killAuraEnabled = state
+		print("Kill Aura:", state)
+	end)
+
+	AuraSection:NewSlider("Aura Range", "Adjust attack distance", 30, 5, function(value)
+		killAuraRange = value
+		print("Aura Range set to:", value)
+	end)
+
+
+	-- --- 2. ЛОГИКА И ИНТЕРФЕЙС HITBOX EXPANDER ---
+	RunService.RenderStepped:Connect(function()
+		for _, targetPlayer in pairs(Players:GetPlayers()) do
+			if targetPlayer ~= localPlayer and targetPlayer.Character then
+				local enemyRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if enemyRoot and enemyRoot:IsA("BasePart") then
+					if hitboxesEnabled then
+						-- Раздуваем хитбокс, делаем его полупрозрачным синим для удобства
+						enemyRoot.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+						enemyRoot.Transparency = 0.7
+						enemyRoot.Color = Color3.fromRGB(0, 100, 255)
+						enemyRoot.Material = Enum.Material.Neon
+						enemyRoot.CanCollide = false -- Чтобы огромные хитбоксы не мешали ходить врагам
+					else
+						-- Возвращаем стандартные параметры хитбокса Roblox
+						enemyRoot.Size = Vector3.new(2, 2, 1)
+						enemyRoot.Transparency = 1
+						enemyRoot.CanCollide = true
+					end
+				end
+			end
+		end
+	end)
+
+	HitboxSection:NewToggle("Expand Hitboxes", "Makes enemy hitboxes massively bigger", function(state)
+		hitboxesEnabled = state
+		print("Hitboxes expanded:", state)
+	end)
+
+	HitboxSection:NewSlider("Hitbox Size", "Adjust enemy size multiplier", 40, 2, function(value)
+		hitboxSize = value
+		print("Hitbox Size set to:", value)
+	end)
+
+
+	-- --- 3. ЛОГИКА И ИНТЕРФЕЙС AUTO CLICKER ---
+	-- Начинаем кликать, если зажата ЛКМ и автокликер включен
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed or not autoClickerEnabled then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			clicking = true
+			while clicking and autoClickerEnabled do
+				local myChar = localPlayer.Character
+				local currentTool = myChar and myChar:FindFirstChildOfClass("Tool")
+				if currentTool then
+					currentTool:Activate()
+				end
+				task.wait(clickDelay)
+			end
+		end
+	end)
+
+	-- Останавливаем клики, когда игрок отпускает ЛКМ
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			clicking = false
+		end
+	end)
+
+	ClickerSection:NewToggle("Hold Auto-Clicker", "Hold Left Click to trigger super fast attacks", function(state)
+		autoClickerEnabled = state
+		if not state then clicking = false end
+		print("Auto-Clicker:", state)
+	end)
+
+	ClickerSection:NewSlider("Click Speed (CPS)", "Adjust click delay (Lower = Faster)", 100, 1, function(value)
+		-- Переводим значение ползунка в задержку (например, 100 CPS = 0.01 сек задержка)
+		clickDelay = 1 / value
+		print("Click Delay set to:", clickDelay)
+	end)
