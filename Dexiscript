@@ -3,7 +3,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHept
 local Window = Library.CreateLib("Test", "Ocean")
 
 --MAIN--
-local Main = Window:NewTab("MainTab1")
+local Main = Window:NewTab("MainTab")
 local PlayerSection = Main:NewSection("Player")
 
 
@@ -112,7 +112,7 @@ end)
 
 
 --Visual--
-local VTab = Window.NewTab("VisualTab")
+local VTab = Window:NewTab("VisualTab")
 local VisualSection = VTab:NewSection("Main Visuals")
 
 	local Players = game:GetService("Players")
@@ -459,10 +459,10 @@ local VisualSection = VTab:NewSection("Main Visuals")
 	local clicking = false
 
 	-- === СОЗДАНИЕ ВКЛАДКИ И СЕКЦИЙ ===
-	local CombatTab = Window.NewTab("Combat")
-	local AuraSection = CombatTab:NewSection("Kill Aura")
-	local HitboxSection = CombatTab:NewSection("Hitboxes")
-	local ClickerSection = CombatTab:NewSection("Auto Clicker")
+	local PowTab = Window:NewTab("CombatTab")
+	local AuraSection = PowTab:NewSection("Kill Aura")
+	local HitboxSection = PowTab:NewSection("Hitboxes")
+	local ClickerSection = PowTab:NewSection("Auto Clicker")
 
 	-- --- 1. ЛОГИКА И ИНТЕРФЕЙС KILL AURA ---
 	RunService.RenderStepped:Connect(function()
@@ -579,7 +579,7 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 local TpTab = Window:NewTab("Teleport")
-local TpSection1 = TpTab:NewSection("Players")
+local TpSection = TpTab:NewSection("Players")
 
 local selectedPlayer
 
@@ -595,11 +595,11 @@ local function getPlayers()
     return list
 end
 
-local Dropdown = TpSection1:NewDropdown("Choose Player", "Bro omg do i REALLY need to explain?", getPlayers(), function(name)
+local Dropdown = TpSection:NewDropdown("Choose Player", "Bro omg do i REALLY need to explain?", getPlayers(), function(name)
     selectedPlayer = Players:FindFirstChild(name)
 end)
 
-TpSection1:NewButton("TP", "TP To the choosen player", function()
+TpSection:NewButton("TP", "TP To the choosen player", function()
     if not selectedPlayer then
         return
     end
@@ -629,9 +629,17 @@ Players.PlayerRemoving:Connect(function(player)
     Dropdown:Refresh(getPlayers(), true)
 end)
 
+TpSection:NewButton("Teleport to VoidGiver", "TP To the center", function()
+    local target = workspace.CenterBlocks.Givers.VoidGiver.Base
+    local character = game.Players.LocalPlayer.Character
+
+    if character and target then
+        character:PivotTo(target.CFrame + Vector3.new(0, -5, 0))
+    end
+end)
 
 --Credits--
-local CTab = Window.NewTab("Credits")
+local CTab = Window:NewTab("Credits")
 local CreditsSection = CTab:NewSection("Creator")
 
 CreditsSection:NewLabel("By Dexi | romathisisi")
