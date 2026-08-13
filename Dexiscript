@@ -574,6 +574,44 @@ local VisualSection = VTab:NewSection("Main Visuals")
 	end)
 
 
+local GodSection = PowTab:NewSection("HP")
+
+local GodModeEnabled = false
+
+-- Логика God Mode через перехват урона
+local LocalPlayer = game:GetService("Players").LocalPlayer
+local MetaTable = getrawmetatable(game)
+setreadonly(MetaTable, false)
+local OldIndex = MetaTable.__index
+
+MetaTable.__index = newcclosure(function(Self, Key)
+    if GodModeEnabled and tostring(Self) == "Humanoid" and Key == "Health" then
+        return 100 -- Возвращает серверу/клиенту максимальное здоровье при проверках
+    end
+    return OldIndex(Self, Key)
+end)
+
+setreadonly(MetaTable, true)
+
+-- Переключатель (Toggle) в меню
+CombatSection:NewToggle("God Mode", "Защищает вас от получения урона", function(state)
+    GodModeEnabled = state
+    
+    -- Дополнительный цикл для удержания здоровья на максимуме
+    task.spawn(function()
+        while GodModeEnabled do
+            pcall(function()
+                local Character = LocalPlayer.Character
+                if Character and Character:FindFirstChildOfClass("Humanoid") then
+                    Character:FindFirstChildOfClass("Humanoid").Health = Character:FindFirstChildOfClass("Humanoid").MaxHealth
+                end
+            end)
+            task.wait(0.1)
+        end
+    end)
+end)
+
+
 --Teleports--
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
