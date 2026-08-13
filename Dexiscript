@@ -594,7 +594,7 @@ end)
 setreadonly(MetaTable, true)
 
 -- Переключатель (Toggle) в меню
-CombatSection:NewToggle("God Mode", "Защищает вас от получения урона", function(state)
+GodSection:NewToggle("God Mode", "Be... immortal.", function(state)
     GodModeEnabled = state
     
     -- Дополнительный цикл для удержания здоровья на максимуме
