@@ -1,6 +1,9 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 
-local Window = Library.CreateLib("Test", "Ocean")
+--Lucky Blocks Battlegrounds
+if game.PlaceId == 662417684 then
+
+local Window = Library.CreateLib("Dexi Hub", "Ocean")
 
 --MAIN--
 local Main = Window:NewTab("Home")
@@ -531,7 +534,7 @@ local VisualSection = VTab:NewSection("Main Visuals")
 		print("Hitboxes expanded:", state)
 	end)
 
-	HitboxSection:NewSlider("Hitbox Size", "Adjust enemy size multiplier", 40, 2, function(value)
+	HitboxSection:NewSlider("Hitbox Size", "Adjust enemy size multiplier", 50, 2, function(value)
 		hitboxSize = value
 		print("Hitbox Size set to:", value)
 	end)
