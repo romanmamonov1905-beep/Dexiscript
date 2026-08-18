@@ -60,9 +60,6 @@ PlayerSection:NewButton("Spin (K)", "Spin with 12000% power", function()
 		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
 	end)
 end)
-
-
-
 PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
 	local Players = game:GetService("Players")
 	local UserInputService = game:GetService("UserInputService")
@@ -113,98 +110,6 @@ PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUA
 	Event:FireServer()
 end)
 
-local selectedPlayerName = ""
-local flingEnabled = false
-local flingConnection = nil
-
--- Функция для получения списка имен всех игроков
-local function getPlayerNames()
-    local names = {}
-    for _, p in ipairs(game.Players:GetPlayers()) do
-        if p ~= game.Players.LocalPlayer then
-            table.insert(names, p.Name)
-        end
-    end
-    return names
-end
-
--- 1. Выпадающее меню (Dropdown) с выбором игрока
-local PlayerDropdown = Section:NewDropdown("Select Target", "Choose a player to fling", getPlayerNames(), function(currentOption)
-    selectedPlayerName = currentOption
-    print("Выбран игрок: " .. selectedPlayerName)
-end)
-
--- Кнопка обновления списка игроков (если кто-то зашел или вышел)
-Section:NewButton("Refresh Player List", "Updates the dropdown menu", function()
-    PlayerDropdown:Refresh(getPlayerNames())
-end)
-
--- 2. Переключатель (Toggle) для включения/выключения флинга
-Section:NewToggle("Enable Fling", "Starts spinning and moving to target", function(state)
-    flingEnabled = state
-    
-    local lp = game.Players.LocalPlayer
-    local char = lp.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    
-    if state then
-        -- Находим цель
-        local targetPlayer = game.Players:FindFirstChild(selectedPlayerName)
-        if not targetPlayer or not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            print("Цель не найдена или мертва!")
-            return
-        end
-        
-        local targetRoot = targetPlayer.Character.HumanoidRootPart
-        
-        -- Создаем безумное вращение
-        local bav = Instance.new("BodyAngularVelocity")
-        bav.Name = "FlingSpin"
-        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-        bav.AngularVelocity = Vector3.new(0, 99999, 0) -- Скорость вращения
-        bav.Parent = root
-        
-        -- Отключаем коллизию с деталями, чтобы не застрять в текстурах при полете
-        for _, part in ipairs(char:GetChildren()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
-        
-        -- Цикл удержания рядом с целью (работает пока Toggle включен)
-        flingConnection = game:GetService("RunService").Heartbeat:Connect(function()
-            if not flingEnabled or not root or not targetRoot.Parent then 
-                if flingConnection then flingConnection:Disconnect() end
-                return 
-            end
-            
-            -- Телепортируем наш RootPart прямо в позицию жертвы с небольшим смещением
-            root.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 0.5)
-            -- Обнуляем обычную скорость, чтобы физика Roblox сходила с ума только от вращения
-            root.Velocity = Vector3.new(0, 0, 0)
-        end)
-    else
-        -- Выключение: убираем вращение и останавливаем цикл
-        if flingConnection then
-            flingConnection:Disconnect()
-            flingConnection = nil
-        end
-        
-        if root and root:FindFirstChild("FlingSpin") then
-            root.FlingSpin:Destroy()
-        end
-        
-        -- Возвращаем коллизию персонажу
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = true
-                end
-            end
-        end
-        print("Флинг выключен")
-    end
-end)
 
 --Visual--
 local VTab = Window:NewTab("Visual") 
