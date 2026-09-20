@@ -38,7 +38,7 @@ PlayerSection:NewButton("Spin (K)", "Spin with 12000% power", function()
 	local player = Players.LocalPlayer
 
 	local rotating = false
-	local speed = 24000 -- градусов в секунду
+	local speed = 6000 -- градусов в секунду
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
