@@ -1,685 +1,520 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+--==================================================================================--
+--           DEXI SCRIPT v3.0 MONOLITH // HORIZONTAL FIXED ONE-CLICK CODE           --
+--==================================================================================--
 
-local Window = Library.CreateLib("Dexi Hub", "Ocean")
-
---MAIN--
-local Main = Window:NewTab("Home")
-local PlayerSection = Main:NewSection("Player")
-
-
--- Слайдер для изменения скорости ( WalkSpeed )
--- Параметры: Название, Описание, Максимум, Минимум, Функция
-PlayerSection:NewSlider("Player Speed", "Adjust your movement speed", 750, 16, function(value)
-	local player = game.Players.LocalPlayer
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:WaitForChild("Humanoid")
-	
-	humanoid.WalkSpeed = value
-	print("Speed changed to: " .. tostring(value))
-end)
-
--- Слайдер для изменения силы прыжка ( JumpPower )
-PlayerSection:NewSlider("Player Jump Power", "Adjust your jump power", 500, 50, function(value)
-	local player = game.Players.LocalPlayer
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:WaitForChild("Humanoid")
-	
-	-- Включаем использование JumpPower, если в игре использовался JumpHeight
-	humanoid.UseJumpPower = true 
-	humanoid.JumpPower = value
-	print("Jump Power changed to: " .. tostring(value))
-end)
-
-PlayerSection:NewButton("Spin (K)", "Spin with 12000% power", function()
-	local Players = game:GetService("Players")
-	local UserInputService = game:GetService("UserInputService")
-	local RunService = game:GetService("RunService")
-
-	local player = Players.LocalPlayer
-
-	local rotating = false
-	local speed = 6000 -- градусов в секунду
-
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-
-		if input.KeyCode == Enum.KeyCode.K then
-			rotating = not rotating
-		end
-	end)
-
-	RunService.RenderStepped:Connect(function(dt)
-		if not rotating then return end
-
-		local character = player.Character
-			if not character then return end
-	
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if not root then return end
-
-		root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(speed) * dt, 0)
-	end)
-end)
-PlayerSection:NewButton("Inf Jumps", "Jump while mid air", function()
-	local Players = game:GetService("Players")
-	local UserInputService = game:GetService("UserInputService")
-
-	local player = Players.LocalPlayer
-
-	-- Меняй это значение из своего GUI:
-	local infiniteJump = true
-
-	UserInputService.JumpRequest:Connect(function()
-		if not infiniteJump then
-			return
-		end
-
-		local character = player.Character
-		if not character then return end
-
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-		end
-	end)
-end)
-PlayerSection:NewButton("Dash (V)", "Teleports you in your direction", function()
-	local Players = game:GetService("Players")
-	local UserInputService = game:GetService("UserInputService")
-
-	local player = Players.LocalPlayer
-	local distance = 25
-
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-
-		if input.KeyCode == Enum.KeyCode.V then
-			local character = player.Character
-			if not character then return end
-
-			local root = character:FindFirstChild("HumanoidRootPart")
-			if not root then return end
-
-			root.CFrame = root.CFrame + root.CFrame.LookVector * distance
-		end
-	end)
-end)
-
-PlayerSection:NewDropdown("Lucky Block Spawner", "Spawns Lucky Blocks (NOT VISUALS)", {"SpawnLuckyBlock", "SpawnSuperBlock", "SpawnDiamondBlock", "SpawnRainbowBlock", "SpawnGalaxyBlock"}, function(currentOption)
-	local Event = game:GetService("ReplicatedStorage")[currentOption]:FireServer()
-	Event:FireServer()
-end)
-
-
---Visual--
-local VTab = Window:NewTab("Visual") 
-local VisualSection = VTab:NewSection("Main Visuals")
-
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
-
-	local localPlayer = Players.LocalPlayer
-	
-	-- Создаем или находим скрытую техническую папку в Workspace для хранения кубов нашего ESP
-	local espFolder = workspace:FindFirstChild("Dexi_PlayerESP_Folder")
-	if not espFolder then
-		espFolder = Instance.new("Folder")
-		espFolder.Name = "Dexi_PlayerESP_Folder"
-		espFolder.Parent = workspace
-	end
-
-	-- Переменная для контроля бесконечного цикла (должна быть строго СНАРУЖИ тумблера)
-	local playerEspConnection = nil 
-
-	-- Создаем тумблер в Kavo UI
-	VisualSection:NewToggle("Player ESP", "Toggle red parts on players", function(state)
-		if state then
-			-- === КОД ВКЛЮЧЕНИЯ ===
-			if playerEspConnection then
-				playerEspConnection:Disconnect()
-				playerEspConnection = nil
-			end
-
-			-- Запускаем цикл отрисовки
-			playerEspConnection = RunService.RenderStepped:Connect(function()
-				for _, targetPlayer in pairs(Players:GetPlayers()) do
-					if targetPlayer ~= localPlayer and targetPlayer.Character then
-						local character = targetPlayer.Character
-						local rootPart = character:FindFirstChild("HumanoidRootPart")
-						
-						if rootPart and rootPart:IsA("BasePart") then
-							-- Ищем куб по уникальному имени (имя игрока + суффикс) внутри нашей изолированной папки
-							local espPart = espFolder:FindFirstChild(targetPlayer.Name .. "_ESP")
-							
-							if not espPart then
-								-- Создаем красный неоновый блок
-								espPart = Instance.new("Part")
-								espPart.Name = targetPlayer.Name .. "_ESP"
-								espPart.Size = Vector3.new(4, 6, 4) -- Полностью покрывает хитбокс
-								espPart.Color = Color3.fromRGB(255, 0, 0)
-								espPart.Transparency = 0.5
-								espPart.Material = Enum.Material.Neon
-								
-								-- Строгие настройки физики, чтобы блоки не падали и не толкались
-								espPart.CanCollide = false
-								espPart.Anchored = true
-								espPart.CastShadow = false
-								
-								espPart.Parent = espFolder
-							end
-							
-							-- Привязываем координаты куба к позиции игрока
-							espPart.CFrame = rootPart.CFrame
-						end
-					end
-				end
-				
-				-- Авто-очистка: если игрок вышел с сервера, удаляем его куб из нашей папки
-				for _, child in pairs(espFolder:GetChildren()) do
-					local pName = child.Name:gsub("_ESP", "")
-					if not Players:FindFirstChild(pName) then
-						child:Destroy()
-					end
-				end
-			end)
-			print("Player ESP: АКТИВИРОВАН")
-		else
-			-- === КОД ВЫКЛЮЧЕНИЯ ===
-			-- 1. Полностью разрываем и убиваем фоновый цикл в памяти
-			if playerEspConnection then
-				playerEspConnection:Disconnect()
-				playerEspConnection = nil
-			end
-
-			-- 2. Мгновенно очищаем всю нашу изолированную папку (все кубы исчезнут разом)
-			espFolder:ClearAllChildren()
-			print("Player ESP: ДЕАКТИВИРОВАН И ОЧИЩЕН")
-		end
-	end)
-	
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
-	local Lighting = game:GetService("Lighting")
-
-	local localPlayer = Players.LocalPlayer
-
-	-- Переменные контроля (ОБЯЗАТЕЛЬНО должны стоять выше самих тумблеров)
-	local tracersEnabled = false
-	local toolEspEnabled = false
-	local fullBrightEnabled = false
-
-	-- Изолированные папки в Workspace, чтобы движок ничего не забагал
-	local beamFolder = workspace:FindFirstChild("Dexi_Tracers_Folder")
-	if not beamFolder then
-		beamFolder = Instance.new("Folder")
-		beamFolder.Name = "Dexi_Tracers_Folder"
-		beamFolder.Parent = workspace
-	end
-
-	local toolEspFolder = workspace:FindFirstChild("Dexi_ToolESP_Folder")
-	if not toolEspFolder then
-		toolEspFolder = Instance.new("Folder")
-		toolEspFolder.Name = "Dexi_ToolESP_Folder"
-		toolEspFolder.Parent = workspace
-	end
-
-	-- Сохраняем стандартные настройки графики игры для корректного выключения FullBright
-	local origAmbient = Lighting.Ambient
-	local origOutdoorAmbient = Lighting.OutdoorAmbient
-	local origBrightness = Lighting.Brightness
-	local origClockTime = Lighting.ClockTime
-
-	-- ЕДИНЫЙ фоновый цикл обработки для всех трех функций
-	RunService.RenderStepped:Connect(function()
-		local myChar = localPlayer.Character
-		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-
-		-- --- 1. ЛОГИКА ТРАСЕРОВ (ЧЕРЕЗ ИГРОВЫЕ ЛУЧИ BEAM) ---
-		if tracersEnabled and myRoot then
-			for _, targetPlayer in pairs(Players:GetPlayers()) do
-				if targetPlayer ~= localPlayer and targetPlayer.Character then
-					local enemyRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-					
-					if enemyRoot and enemyRoot:IsA("BasePart") then
-						local beamName = targetPlayer.Name .. "_Beam"
-						local beam = beamFolder:FindFirstChild(beamName)
-						local att0 = myRoot:FindFirstChild("MyTracerAttachment")
-						local att1 = enemyRoot:FindFirstChild("EnemyTracerAttachment")
-
-						-- Создаем точки привязки лазера, если их нет
-						if not att0 then
-							att0 = Instance.new("Attachment")
-							att0.Name = "MyTracerAttachment"
-							att0.Parent = myRoot
-						end
-						if not att1 then
-							att1 = Instance.new("Attachment")
-							att1.Name = "EnemyTracerAttachment"
-							att1.Parent = enemyRoot
-						end
-
-						-- Создаем сам лазерный луч Beam
-						if not beam then
-							beam = Instance.new("Beam")
-							beam.Name = beamName
-							beam.Width0 = 0.15 -- Толщина лазера у вас
-							beam.Width1 = 0.15 -- Толщина лазера у врага
-							beam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0)) -- Красный цвет
-							beam.FaceCamera = true
-							beam.Transparency = NumberSequence.new(0.4) -- Прозрачность луча
-							beam.Attachment0 = att0
-							beam.Attachment1 = att1
-							beam.Parent = beamFolder
-						end
-					end
-				end
-			end
-		else
-			-- Полная зачистка лазеров при выключении
-			beamFolder:ClearAllChildren()
-			for _, p in pairs(Players:GetPlayers()) do
-				if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-					local att = p.Character.HumanoidRootPart:FindFirstChild("EnemyTracerAttachment")
-					if att then att:Destroy() end
-				end
-			end
-			if myRoot then
-				local att = myRoot:FindFirstChild("MyTracerAttachment")
-				if att then att:Destroy() end
-			end
-		end
-
-		-- --- 2. ЛОГИКА TOOLS & ITEMS ESP (ДЛЯ LUCKY BLOCKS) ---
-		if toolEspEnabled then
-			for _, object in pairs(workspace:GetDescendants()) do
-				-- Ищем Tool, либо детали с кнопками поднятия, либо объекты со словом "Lucky" или "Block"
-				if object:IsA("Tool") or object:IsA("ProximityPrompt") or object:IsA("ClickDetector") or 
-				(object:IsA("BasePart") and (object.Name:lower():find("lucky") or object.Name:lower():find("block"))) then
-					
-					-- Определяем главную физическую деталь предмета на земле
-					local handle = nil
-					if object:IsA("BasePart") then
-						handle = object
-					else
-						handle = object.Parent:FindFirstChild("Handle") or object.Parent:FindFirstChildWhichIsA("BasePart")
-					end
-
-					-- Проверяем, что этот предмет лежит на земле, а не экипирован кем-то в руках
-					local isEquipped = handle and handle:FindFirstAncestorOfClass("Model") and handle.Parent:FindFirstChildOfClass("Humanoid")
-
-					if handle and handle:IsA("BasePart") and not isEquipped and not handle:IsDescendantOf(myChar) then
-						-- Генерируем уникальное имя для куба подсветки на основе позиции
-						local cubeName = "Item_" .. math.floor(handle.Position.X) .. "_" .. math.floor(handle.Position.Z)
-						local toolCube = toolEspFolder:FindFirstChild(cubeName)
-						
-						if not toolCube then
-							toolCube = Instance.new("Part")
-							toolCube.Name = cubeName
-							toolCube.Size = handle.Size + Vector3.new(0.6, 0.6, 0.6) -- Делаем куб чуть больше предмета
-							toolCube.Color = Color3.fromRGB(0, 150, 255) -- Красивый ярко-синий неоновый цвет
-							toolCube.Transparency = 0.5
-							toolCube.Material = Enum.Material.Neon
-							
-							toolCube.CanCollide = false
-							toolCube.Anchored = true
-							toolCube.CastShadow = false
-							
-							toolCube.Parent = toolEspFolder
-						end
-						toolCube.CFrame = handle.CFrame
-					end
-				end
-			end
-			
-			-- Быстрая авто-очистка синих кубов при переполнении (защита от лагов)
-			if #toolEspFolder:GetChildren() > 60 then 
-				toolEspFolder:ClearAllChildren()
-			end
-		else
-			toolEspFolder:ClearAllChildren()
-		end
-
-		-- --- 3. ЛОГИКА FULLBRIGHT (НОЧНОЕ ЗРЕНИЕ) ---
-		if fullBrightEnabled then
-			Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-			Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-			Lighting.Brightness = 3
-			Lighting.ClockTime = 14 -- Всегда солнечный день
-		end
-	end)
-
-
-	-- ==================== СВЯЗЫВАЕМ С ТУМБЛЕРАМИ KAVO UI ====================
-
-	-- 1. Тумблер Трасеров (Линий к игрокам)
-	VisualSection:NewToggle("Player Tracers", "Draws neon beams to all players", function(state)
-		tracersEnabled = state
-		print("Tracers status:", state)
-	end)
-
-	-- 2. Тумблер подсветки Оружия и Блоков
-	VisualSection:NewToggle("Item & Tool ESP", "Spawns a blue glow on dropped items/blocks", function(state)
-		toolEspEnabled = state
-		print("Tool ESP status:", state)
-	end)
-
-	-- 3. Тумблер Ночного зрения (FullBright)
-	VisualSection:NewToggle("FullBright", "Disables darkness and shadows", function(state)
-		fullBrightEnabled = state
-		if not state then
-			-- Когда выключаем, принудительно возвращаем оригинальную графику карты обратно
-			Lighting.Ambient = origAmbient
-			Lighting.OutdoorAmbient = origOutdoorAmbient
-			Lighting.Brightness = origBrightness
-			Lighting.ClockTime = origClockTime
-		end
-		print("FullBright status:", state)
-	end)
-
-	local Players = game:GetService("Players")
-
-	local player = Players.LocalPlayer
-	local isInvisible = false
-	local savedCharacterCFrame = nil
-
-	local Players = game:GetService("Players")
-
-	local player = Players.LocalPlayer
-	local localHighlight = nil
-
-	-- Создаем тумблер (Toggle) в вашем Kavo UI
-	VisualSection:NewToggle("Invisibility", "Makes your character invisible", function(state)
-		local character = player.Character
-		if not character then return end
-		
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if not root then return end
-
-		if state then
-			-- === КОД ВКЛЮЧЕНИЯ ===
-			-- 1. Полностью скрываем настоящее тело от других игроков на сервере
-			for _, part in pairs(character:GetDescendants()) do
-				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-					part.Transparency = 1
-				elseif part:IsA("Decal") then
-					part.Transparency = 1
-				end
-			end
-
-			-- 2. Создаем локальную подсветку-силуэт (Highlight) только для ваших глаз
-			if not localHighlight then
-				localHighlight = Instance.new("Highlight")
-				localHighlight.Name = "LocalGhostHighlight"
-				localHighlight.FillColor = Color3.fromRGB(0, 150, 255) -- Синеватый неоновый призрак
-				localHighlight.FillTransparency = 0.6 -- Прозрачность тела
-				localHighlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- Белая аккуратная обводка
-				localHighlight.OutlineTransparency = 0.2
-				localHighlight.Adornee = character
-				localHighlight.Parent = character
-			end
-			print("Invisibility: ON (No-Clone Method)")
-		else
-			-- === КОД ВЫКЛЮЧЕНИЯ ===
-			-- 1. Уничтожаем подсветку призрака
-			if localHighlight then
-				localHighlight:Destroy()
-				localHighlight = nil
-			end
-
-			-- 2. Возвращаем стандартную видимость вашему настоящему персонажу
-			for _, part in pairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.Transparency = 0
-				elseif part:IsA("Decal") then
-					part.Transparency = 0
-				end
-			end
-			
-			-- Технический хитбокс должен снова стать невидимым
-			if root then root.Transparency = 1 end
-			print("Invisibility: OFF")
-		end
-	end)
-
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
-	local UserInputService = game:GetService("UserInputService")
-
-	local localPlayer = Players.LocalPlayer
-
-	-- Переменные контроля функций (ОБЯЗАТЕЛЬНО должны стоять выше элементов интерфейса)
-	local killAuraEnabled = false
-	local killAuraRange = 15 -- Дистанция работы Киллауры
-
-	local hitboxesEnabled = false
-	local hitboxSize = 10 -- Размер хитбокса врагов
-
-	local autoClickerEnabled = false
-	local clickDelay = 0.01 -- Задержка автокликера (чем меньше, тем быстрее)
-	local clicking = false
-
-	-- === СОЗДАНИЕ ВКЛАДКИ И СЕКЦИЙ ===
-	local PowTab = Window:NewTab("Combat")
-	local AuraSection = PowTab:NewSection("Kill Aura")
-	local HitboxSection = PowTab:NewSection("Hitboxes")
-	local ClickerSection = PowTab:NewSection("Auto Clicker")
-
-	-- --- 1. ЛОГИКА И ИНТЕРФЕЙС KILL AURA ---
-	RunService.RenderStepped:Connect(function()
-		if not killAuraEnabled then return end
-		local myChar = localPlayer.Character
-		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-		-- Ищем экипированное оружие в руках (объект Tool внутри персонажа)
-		local currentTool = myChar and myChar:FindFirstChildOfClass("Tool")
-		
-		if myRoot and currentTool then
-			for _, targetPlayer in pairs(Players:GetPlayers()) do
-				if targetPlayer ~= localPlayer and targetPlayer.Character then
-					local enemyRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-					local enemyHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-					
-					-- Проверяем дистанцию до врага и жив ли он
-					if enemyRoot and enemyHumanoid and enemyHumanoid.Health > 0 then
-						local distance = (myRoot.Position - enemyRoot.Position).Magnitude
-						if distance <= killAuraRange then
-							-- Активируем инструмент (имитируем взмах мечом)
-							currentTool:Activate()
-						end
-					end
-				end
-			end
-		end
-	end)
-
-	AuraSection:NewToggle("Kill Aura", "Automatically attacks nearby players if tool equipped", function(state)
-		killAuraEnabled = state
-		print("Kill Aura:", state)
-	end)
-
-	AuraSection:NewSlider("Aura Range", "Adjust attack distance", 30, 5, function(value)
-		killAuraRange = value
-		print("Aura Range set to:", value)
-	end)
-
-
-	-- --- 2. ЛОГИКА И ИНТЕРФЕЙС HITBOX EXPANDER ---
-	RunService.RenderStepped:Connect(function()
-		for _, targetPlayer in pairs(Players:GetPlayers()) do
-			if targetPlayer ~= localPlayer and targetPlayer.Character then
-				local enemyRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-				if enemyRoot and enemyRoot:IsA("BasePart") then
-					if hitboxesEnabled then
-						-- Раздуваем хитбокс, делаем его полупрозрачным синим для удобства
-						enemyRoot.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-						enemyRoot.Transparency = 0.7
-						enemyRoot.Color = Color3.fromRGB(0, 100, 255)
-						enemyRoot.Material = Enum.Material.Neon
-						enemyRoot.CanCollide = false -- Чтобы огромные хитбоксы не мешали ходить врагам
-					else
-						-- Возвращаем стандартные параметры хитбокса Roblox
-						enemyRoot.Size = Vector3.new(2, 2, 1)
-						enemyRoot.Transparency = 1
-						enemyRoot.CanCollide = true
-					end
-				end
-			end
-		end
-	end)
-
-	HitboxSection:NewToggle("Expand Hitboxes", "Makes enemy hitboxes massively bigger", function(state)
-		hitboxesEnabled = state
-		print("Hitboxes expanded:", state)
-	end)
-
-	HitboxSection:NewSlider("Hitbox Size", "Adjust enemy size multiplier", 50, 2, function(value)
-		hitboxSize = value
-		print("Hitbox Size set to:", value)
-	end)
-
-
-	-- --- 3. ЛОГИКА И ИНТЕРФЕЙС AUTO CLICKER ---
-	-- Начинаем кликать, если зажата ЛКМ и автокликер включен
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or not autoClickerEnabled then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			clicking = true
-			while clicking and autoClickerEnabled do
-				local myChar = localPlayer.Character
-				local currentTool = myChar and myChar:FindFirstChildOfClass("Tool")
-				if currentTool then
-					currentTool:Activate()
-				end
-				task.wait(clickDelay)
-			end
-		end
-	end)
-
-	-- Останавливаем клики, когда игрок отпускает ЛКМ
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			clicking = false
-		end
-	end)
-
-	ClickerSection:NewToggle("Hold Auto-Clicker", "Hold Left Click to trigger super fast attacks", function(state)
-		autoClickerEnabled = state
-		if not state then clicking = false end
-		print("Auto-Clicker:", state)
-	end)
-
-	ClickerSection:NewSlider("Click Speed (CPS)", "Adjust click delay (Lower = Faster)", 100, 1, function(value)
-		-- Переводим значение ползунка в задержку (например, 100 CPS = 0.01 сек задержка)
-		clickDelay = 1 / value
-		print("Click Delay set to:", clickDelay)
-	end)
-
-
-local GodSection = PowTab:NewSection("HP")
-
-local GodModeEnabled = false
-
--- Логика God Mode через перехват урона
-local LocalPlayer = game:GetService("Players").LocalPlayer
-local MetaTable = getrawmetatable(game)
-setreadonly(MetaTable, false)
-local OldIndex = MetaTable.__index
-
-MetaTable.__index = newcclosure(function(Self, Key)
-	if GodModeEnabled and tostring(Self) == "Humanoid" and Key == "Health" then
-		return 100 -- Возвращает серверу/клиенту максимальное здоровье при проверках
-	end
-	return OldIndex(Self, Key)
-end)
-
-setreadonly(MetaTable, true)
-
--- Переключатель (Toggle) в меню
-GodSection:NewToggle("God Mode", "Be... immortal.", function(state)
-	GodModeEnabled = state
-	
-	-- Дополнительный цикл для удержания здоровья на максимуме
-	task.spawn(function()
-		while GodModeEnabled do
-			pcall(function()
-				local Character = LocalPlayer.Character
-				if Character and Character:FindFirstChildOfClass("Humanoid") then
-					Character:FindFirstChildOfClass("Humanoid").Health = Character:FindFirstChildOfClass("Humanoid").MaxHealth
-				end
-			end)
-			task.wait(0.1)
-		end
-	end)
-end)
-
-
---Teleports--
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 
-local TpTab = Window:NewTab("Teleport")
-local TpSection = TpTab:NewSection("Players")
+local SliderValues = { CurrentSpeed = 16, CurrentJump = 50 }
+local States = {}
+local Tabs = {}
+local Connections = { Esp = {}, Custom = {} }
+local CONFIG = { FlySpeed = 50, AimbotFov = 180, AimbotSmoothness = 0.08 }
 
-local selectedPlayer
-
-local function getPlayers()
-	local list = {}
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer then
-			table.insert(list, player.Name)
-		end
-	end
-
-	return list
+--------------------------------------------------------------------------------------
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПЕРСОНАЖА
+--------------------------------------------------------------------------------------
+local function GetChar()
+    return LocalPlayer.Character
 end
 
-local Dropdown = TpSection:NewDropdown("Choose Player", "Bro omg do i REALLY need to explain?", getPlayers(), function(name)
-	selectedPlayer = Players:FindFirstChild(name)
-end)
+local function GetHum()
+    local char = GetChar()
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
 
-TpSection:NewButton("TP", "TP To the choosen player", function()
-	if not selectedPlayer then
-		return
-	end
+local function GetRoot()
+    local char = GetChar()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
 
-	local character = LocalPlayer.Character
-	local targetCharacter = selectedPlayer.Character
-
-	if character and targetCharacter then
-		local myRoot = character:FindFirstChild("HumanoidRootPart")
-		local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-
-		if myRoot and targetRoot then
-			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+local function GetClosestPlayer()
+    Camera = workspace.CurrentCamera
+	local closest, shortest = nil, CONFIG.AimbotFov
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+			local pos, onScreen = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+			if onScreen then
+				local d = (Vector2.new(pos.X, pos.Y) - UserInputService:GetMouseLocation()).Magnitude
+				if d < shortest then shortest = d closest = p end
+			end
 		end
 	end
+	return closest
+end
+
+--------------------------------------------------------------------------------------
+-- ГЕНЕРАЦИЯ ГРАФИЧЕСКОГО ИНТЕРФЕЙСА (UI)
+--------------------------------------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DexiScript_Horizontal"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 520, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -260, 0.5, -160)
+MainFrame.BackgroundColor3 = Color3.fromRGB(13, 10, 18)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 2
+MainStroke.Color = Color3.fromRGB(130, 30, 240)
+MainStroke.Parent = MainFrame
+
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(22, 17, 30)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 10)
+HeaderCorner.Parent = Header
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 300, 1, 0)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "DEXI SCRIPT v3.0 // Monolith"
+Title.TextColor3 = Color3.fromRGB(210, 170, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+local ControlCluster = Instance.new("Frame")
+ControlCluster.Size = UDim2.new(0, 80, 1, 0)
+ControlCluster.Position = UDim2.new(1, -85, 0, 0)
+ControlCluster.BackgroundTransparency = 1
+ControlCluster.Parent = Header
+
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Size = UDim2.new(1, 0, 1, -40)
+ContentContainer.Position = UDim2.new(0, 0, 0, 40)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.ClipsDescendants = true
+ContentContainer.Parent = MainFrame
+
+-- Конструктор кнопок [ — ] и [ X ]
+local function createTopButton(text, xOffset, color, callback)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 30, 0, 26)
+	btn.Position = UDim2.new(0, xOffset, 0.5, -13)
+	btn.BackgroundColor3 = Color3.fromRGB(30, 24, 42)
+	btn.Text = text
+	btn.TextColor3 = color
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.AutoButtonColor = false
+	btn.Parent = ControlCluster
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	btn.MouseButton1Click:Connect(callback)
+end
+
+local isMinimized = false
+createTopButton("—", 5, Color3.fromRGB(200, 160, 255), function()
+	isMinimized = not isMinimized
+	local targetSize = isMinimized and UDim2.new(0, 520, 0, 40) or UDim2.new(0, 520, 0, 320)
+	TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = targetSize}):Play()
 end)
 
-Players.PlayerAdded:Connect(function()
-	Dropdown:Refresh(getPlayers(), true)
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-	if selectedPlayer == player then
-		selectedPlayer = nil
+local function SelfDestruct()
+	for _, c in pairs(Connections) do
+		if type(c) == "table" then for _, v in ipairs(c) do v:Disconnect() end
+		elseif c then c:Disconnect() end
 	end
+	local hrp, hum = GetRoot(), GetHum()
+	if hrp and hrp:FindFirstChild("DexiFly") then hrp.DexiFly:Destroy() end
+	if hrp and hrp:FindFirstChild("DexiSpin") then hrp.DexiSpin:Destroy() end
+	if hum then hum.PlatformStand = false end
+	Lighting.Ambient = Color3.fromRGB(128, 128, 128)
+	ScreenGui:Destroy()
+end
 
-	Dropdown:Refresh(getPlayers(), true)
-end)
+createTopButton("X", 45, Color3.fromRGB(255, 70, 100), SelfDestruct)
 
-TpSection:NewButton("Teleport to VoidGiver", "TP To the center", function()
-	local target = workspace.CenterBlocks.Givers.VoidGiver.Base
-	local character = game.Players.LocalPlayer.Character
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 120, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(18, 14, 25)
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = ContentContainer
 
-	if character and target then
-		character:PivotTo(target.CFrame + Vector3.new(0, 10, 0))
+Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 8)
+
+local TabList = Instance.new("UIListLayout")
+TabList.Padding = UDim.new(0, 6)
+TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabList.SortOrder = Enum.SortOrder.LayoutOrder
+TabList.Parent = Sidebar
+
+local TabContentFrame = Instance.new("Frame")
+TabContentFrame.Size = UDim2.new(1, -135, 1, -15)
+TabContentFrame.Position = UDim2.new(0, 130, 0, 10)
+TabContentFrame.BackgroundTransparency = 1
+TabContentFrame.Parent = ContentContainer
+
+--------------------------------------------------------------------------------------
+-- АВТОМАТИЗАЦИЯ СБОРКИ ЭЛЕМЕНТОВ
+--------------------------------------------------------------------------------------
+local firstTab = true
+local function RegisterTab(tabName, layoutOrder)
+	local TabBtn = Instance.new("TextButton")
+	TabBtn.Size = UDim2.new(0, 105, 0, 32)
+	TabBtn.BackgroundColor3 = Color3.fromRGB(26, 20, 35)
+	TabBtn.Text = tabName
+	TabBtn.TextColor3 = Color3.fromRGB(160, 150, 180)
+	TabBtn.Font = Enum.Font.GothamMedium
+	TabBtn.TextSize = 12
+	TabBtn.LayoutOrder = layoutOrder
+	TabBtn.Parent = Sidebar
+	Instance.new("UICorner", TabBtn).CornerRadius = UDim.new(0, 6)
+	
+	local ScrollContainer = Instance.new("ScrollingFrame")
+	ScrollContainer.Size = UDim2.new(1, 0, 1, 0)
+	ScrollContainer.BackgroundTransparency = 1
+	ScrollContainer.BorderSizePixel = 0
+	ScrollContainer.ScrollBarThickness = 3
+	ScrollContainer.ScrollBarImageColor3 = Color3.fromRGB(130, 30, 240)
+	ScrollContainer.Visible = firstTab
+	ScrollContainer.Parent = TabContentFrame
+	
+	local List = Instance.new("UIListLayout")
+	List.Padding = UDim.new(0, 6)
+	List.SortOrder = Enum.SortOrder.LayoutOrder
+	List.Parent = ScrollContainer
+	
+	List:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, List.AbsoluteContentSize.Y + 10)
+	end)
+	
+	if firstTab then
+		TabBtn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
+		TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		firstTab = false
 	end
+	
+	Tabs[tabName] = ScrollContainer
+	
+	TabBtn.MouseButton1Click:Connect(function()
+		for _, sc in pairs(Tabs) do sc.Visible = false end
+		for _, b in ipairs(Sidebar:GetChildren()) do
+			if b:IsA("TextButton") then
+				b.BackgroundColor3 = Color3.fromRGB(26, 20, 35)
+				b.TextColor3 = Color3.fromRGB(160, 150, 180)
+			end
+		end
+		ScrollContainer.Visible = true
+		TabBtn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
+		TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	end)
+end
+
+local function AddButton(tabName, text, stateKey, callback)
+	local targetContainer = Tabs[tabName]
+	States[stateKey] = false
+	local Btn = Instance.new("TextButton")
+	Btn.Size = UDim2.new(1, -5, 0, 34)
+	Btn.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
+	Btn.Text = text
+	Btn.TextColor3 = Color3.fromRGB(190, 190, 190)
+	Btn.Font = Enum.Font.GothamMedium
+	Btn.TextSize = 12
+	Btn.AutoButtonColor = false
+	Btn.Parent = targetContainer
+	Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
+	local stroke = Instance.new("UIStroke", Btn)
+	stroke.Color = Color3.fromRGB(45, 38, 55)
+	
+	Btn.MouseButton1Click:Connect(function()
+		States[stateKey] = not States[stateKey]
+		callback(States[stateKey])
+		if States[stateKey] then
+			Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+			Btn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
+			stroke.Color = Color3.fromRGB(180, 80, 255)
+		else
+			Btn.TextColor3 = Color3.fromRGB(190, 190, 190)
+			Btn.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
+			stroke.Color = Color3.fromRGB(45, 38, 55)
+		end
+	end)
+end
+
+local function AddSlider(tabName, name, min, max, default, callback)
+	local targetContainer = Tabs[tabName]
+	local SliderBg = Instance.new("Frame")
+	SliderBg.Size = UDim2.new(1, -5, 0, 42)
+	SliderBg.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
+	SliderBg.Parent = targetContainer
+	Instance.new("UICorner", SliderBg).CornerRadius = UDim.new(0, 6)
+	
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.new(1, -16, 0, 18)
+	Label.Position = UDim2.new(0, 8, 0, 2)
+	Label.BackgroundTransparency = 1
+	Label.Text = name .. ": " .. tostring(default)
+	Label.TextColor3 = Color3.fromRGB(170, 160, 180)
+	Label.Font = Enum.Font.GothamSemibold
+	Label.TextSize = 11
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Parent = SliderBg
+	
+	local Track = Instance.new("Frame")
+	Track.Size = UDim2.new(1, -16, 0, 4)
+
+
+
+
+Track.Position = UDim2.new(0, 8, 0, 26)
+Track.BackgroundColor3 = Color3.fromRGB(45, 35, 55)
+Track.BorderSizePixel = 0
+Track.Parent = SliderBg
+
+local Fill = Instance.new("Frame")
+Fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
+Fill.BackgroundColor3 = Color3.fromRGB(130, 30, 240)
+Fill.BorderSizePixel = 0
+Fill.Parent = Track
+
+local dragging = false
+local function update(input)
+local relX = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+Fill.Size = UDim2.new(relX, 0, 1, 0)
+local val = math.floor(min + (max - min) * relX)
+Label.Text = name .. ": " .. tostring(val)
+callback(val)
+end
+Track.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true update(i) end end)
+UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then update(i) end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+end
+
+
+
+RegisterTab("Combat", 1)
+RegisterTab("Movement", 2)
+RegisterTab("Visuals", 3)
+RegisterTab("Misc", 4)
+
+-- COMBAT
+AddButton("Combat", "AimBot (Наведение на головы)", "Aimbot", function(state)
+if state then
+Connections.Aimbot = RunService.RenderStepped:Connect(function()
+local target = GetClosestPlayer()
+if target and target.Character:FindFirstChild("Head") then
+Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, target.Character.Head.Position), CONFIG.AimbotSmoothness)
+end
+end)
+else
+if Connections.Aimbot then Connections.Aimbot:Disconnect() Connections.Aimbot = nil end
+end
 end)
 
---Credits--
-local CTab = Window:NewTab("Credits") 
-local CreditsSection = CTab:NewSection("Creator")
+AddButton("Combat", "TriggerBot (Автовыстрел на врагах)", "Trigger", function(state)
+if state then
+Connections.Trigger = RunService.RenderStepped:Connect(function()
+local mouse = LocalPlayer:GetMouse()
+if mouse.Target and mouse.Target.Parent:FindFirstChildOfClass("Humanoid") then
+local t = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+if t then t:Activate() end
+end
+end)
+else
+if Connections.Trigger then Connections.Trigger:Disconnect() Connections.Trigger = nil end
+end
+end)
 
-CreditsSection:NewLabel("By Dexi | romathisisi")
-CreditsSection:NewLabel("Supported games: Lucky Blocks Battlegrounds")
-CreditsSection:NewLabel("Have Fun")
+-- MOVEMENT
+AddSlider("Movement", "Скорость (WalkSpeed)", 16, 250, 16, function(v)
+SliderValues.CurrentSpeed = v
+local h = GetHum() if h then h.WalkSpeed = v end
+end)
+
+AddSlider("Movement", "Прыжок (JumpPower)", 50, 300, 50, function(v)
+SliderValues.CurrentJump = v
+local h = GetHum() if h then h.UseJumpPower = true h.JumpPower = v end
+end)
+
+AddButton("Movement", "Fly Mod (Полет по камере)", "Fly", function(state)
+local hrp, hum = GetRoot(), GetHum()
+if state and hrp and hum then
+local bv = Instance.new("BodyVelocity")
+bv.Name = "DexiFly"
+bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+bv.Parent = hrp
+hum.PlatformStand = true
+Connections.Fly = RunService.RenderStepped:Connect(function()
+bv.Velocity = hum.MoveDirection.Magnitude > 0 and Camera.CFrame.LookVector * (hum.MoveDirection.Magnitude * CONFIG.FlySpeed) or Vector3.new(0,0,0)
+end)
+else
+if Connections.Fly then Connections.Fly:Disconnect() Connections.Fly = nil end
+if hrp and hrp:FindFirstChild("DexiFly") then hrp.DexiFly:Destroy() end
+if hum then hum.PlatformStand = false end
+end
+end)
+
+AddButton("Movement", "Noclip By Key (Зажмите Ctrl для стен)", "NoclipKey", function(state)
+if state then
+Connections.NoclipKey = RunService.Stepped:Connect(function()
+if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and LocalPlayer.Character then
+for _, p in ipairs(LocalPlayer.Character:GetChildren()) do
+if p:IsA("BasePart") then p.CanCollide = false end
+end
+end
+end)
+else
+if Connections.NoclipKey then Connections.NoclipKey:Disconnect() Connections.NoclipKey = nil end
+end
+end)
+
+AddButton("Movement", "Infinite Jump (Бесконечный прыжок)", "InfJump", function(state)
+if state then
+Connections.InfJump = UserInputService.InputBegan:Connect(function(i, p)
+if not p and i.KeyCode == Enum.KeyCode.Space then
+local h = GetHum() if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end
+end)
+else
+if Connections.InfJump then Connections.InfJump:Disconnect() Connections.InfJump = nil end
+end
+end)
+
+AddButton("Movement", "BunnyHop (Авто-распрыжка)", "Bhop", function(state)
+if state then
+Connections.Bhop = RunService.RenderStepped:Connect(function()
+if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+local h = GetHum() if h and h.FloorMaterial ~= Enum.Material.Air then h.Jump = true end
+end
+end)
+else
+if Connections.Bhop then Connections.Bhop:Disconnect() Connections.Bhop = nil end
+end
+end)
+
+-- VISUALS
+AddButton("Visuals", "WallHack ESP (Подсветка игроков)", "Esp", function(state)
+local function apply(p)
+if p == LocalPlayer then return end
+local function addhl(char)
+if char:FindFirstChild("DexiESP") then return end
+local hl = Instance.new("Highlight")
+hl.Name = "DexiESP"
+hl.FillColor = Color3.fromRGB(140, 20, 255)
+hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+hl.Parent = char
+end
+if p.Character then addhl(p.Character) end
+table.insert(Connections.Esp, p.CharacterAdded:Connect(addhl))
+end
+if state then
+for _, p in ipairs(Players:GetPlayers()) do apply(p) end
+table.insert(Connections.Esp, Players.PlayerAdded:Connect(apply))
+else
+for _, c in ipairs(Connections.Esp) do c:Disconnect() end
+table.clear(Connections.Esp)
+for _, p in ipairs(Players:GetPlayers()) do
+if p.Character and p.Character:FindFirstChild("DexiESP") then p.Character.DexiESP:Destroy() end
+end
+end
+end)
+
+AddButton("Visuals", "FullBright (Ночное зрение)", "FullBright", function(state)
+if state then Lighting.Ambient = Color3.fromRGB(255, 255, 255) Lighting.Brightness = 2 else Lighting.Ambient = Color3.fromRGB(128, 128, 128) Lighting.Brightness = 1 end
+end)
+
+AddButton("Visuals", "Map X-Ray (Прозрачная карта)", "Xray", function(state)
+for _, p in ipairs(workspace:GetDescendants()) do
+if p:IsA("BasePart") and not (LocalPlayer.Character and p:IsDescendantOf(LocalPlayer.Character)) and not (p.Parent and p.Parent:FindFirstChildOfClass("Humanoid")) then
+if state then
+if not p:GetAttribute("OldTr") then p:SetAttribute("OldTr", p.Transparency) end
+p.Transparency = 0.6
+else
+local o = p:GetAttribute("OldTr") if o then p.Transparency = o p:SetAttribute("OldTr", nil) end
+end
+end
+end
+end)
+
+-- MISC
+AddButton("Misc", "Ctrl+Click Teleport (Телепортация)", "ClickTP", function(state)
+if state then
+local m = LocalPlayer:GetMouse()
+Connections.ClickTp = m.Button1Down:Connect(function()
+if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and m.Target and GetRoot() then
+GetRoot().CFrame = CFrame.new(m.Hit.Position + Vector3.new(0, 3, 0))
+end
+end)
+else
+if Connections.ClickTp then Connections.ClickTp:Disconnect() Connections.ClickTp = nil end
+end
+end)
+
+AddButton("Misc", "AutoClicker (Зажмите клавишу T)", "Clicker", function(state)
+if state then
+Connections.AutoClick = RunService.RenderStepped:Connect(function()
+if UserInputService:IsKeyDown(Enum.KeyCode.T) then
+local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+if tool then tool:Activate() end
+end
+end)
+else
+if Connections.AutoClick then Connections.AutoClick:Disconnect() Connections.AutoClick = nil end
+end
+end)
+
+AddButton("Misc", "Spin Bot (Вращение)", "Spin", function(state)
+local hrp = GetRoot()
+if state and hrp then
+local bg = Instance.new("BodyAngularVelocity")
+bg.Name = "DexiSpin"
+bg.MaxTorque = Vector3.new(0, math.huge, 0)
+bg.AngularVelocity = Vector3.new(0, 60, 0)
+bg.Parent = hrp
+else
+if hrp and hrp:FindFirstChild("DexiSpin") then hrp.DexiSpin:Destroy() end
+end
+end)
+
+
+
+local drag, dragInput, start, startPos
+Header.InputBegan:Connect(function(i)
+if i.UserInputType == Enum.UserInputType.MouseButton1 then
+drag = true start = i.Position startPos = MainFrame.Position
+i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then drag = false end end)
+end
+end)
+Header.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement then dragInput = i end end)
+UserInputService.InputChanged:Connect(function(i)
+if i == dragInput and drag then
+local d = i.Position - start
+MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+end
+end)
+
+UserInputService.InputBegan:Connect(function(i, proc)
+if not proc and i.KeyCode == Enum.KeyCode.V and MainFrame then MainFrame.Visible = not MainFrame.Visible end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+task.wait(0.6)
+local hum = char:WaitForChild("Humanoid", 5)
+if hum then
+hum.WalkSpeed = SliderValues.CurrentSpeed
+if SliderValues.CurrentJump > 50 then hum.UseJumpPower = true hum.JumpPower = SliderValues.CurrentJump end
+end
+end)
