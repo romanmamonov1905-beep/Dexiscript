@@ -1,5 +1,6 @@
 --==================================================================================--
---           DEXI SCRIPT v3.0 MONOLITH // HORIZONTAL FIXED ONE-CLICK CODE           --
+--                                   DEXI SCRIPT                                    --
+--                     CLEANED / ROBLOX STUDIO LUAU VERSION                        --
 --==================================================================================--
 
 local Players = game:GetService("Players")
@@ -7,514 +8,2123 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
+local VirtualUser = game:GetService("VirtualUser")
+
 local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
 local Camera = workspace.CurrentCamera
 
-local SliderValues = { CurrentSpeed = 16, CurrentJump = 50 }
-local States = {}
-local Tabs = {}
-local Connections = { Esp = {}, Custom = {} }
-local CONFIG = { FlySpeed = 50, AimbotFov = 180, AimbotSmoothness = 0.08 }
+--==================================================================================--
+-- DATABASE
+--==================================================================================--
 
---------------------------------------------------------------------------------------
--- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ПЕРСОНАЖА
---------------------------------------------------------------------------------------
+local Db = {
+	SliderValues = {
+		Speed = 16,
+		Jump = 50,
+		AimFov = 150,
+		FlySpeed = 60,
+		Time = 14,
+		HitboxSize = 2,
+		FakeLag = 0
+	},
+
+	States = {},
+	Tabs = {},
+	Connections = {},
+	EspCache = {},
+	BoxCache = {},
+	LinesCache = {},
+	Keybinds = {}
+}
+
+local BindingKey = nil
+local BindingButton = nil
+
+--==================================================================================--
+-- CHARACTER UTILITIES
+--==================================================================================--
+
 local function GetChar()
-    return LocalPlayer.Character
+	return LocalPlayer.Character
+		or LocalPlayer.CharacterAdded:Wait()
 end
 
 local function GetHum()
-    local char = GetChar()
-    return char and char:FindFirstChildOfClass("Humanoid")
+	local char = GetChar()
+	return char:FindFirstChildOfClass("Humanoid")
+		or char:WaitForChild("Humanoid", 5)
 end
 
 local function GetRoot()
-    local char = GetChar()
-    return char and char:FindFirstChild("HumanoidRootPart")
+	local char = GetChar()
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:WaitForChild("HumanoidRootPart", 5)
 end
 
-local function GetClosestPlayer()
-    Camera = workspace.CurrentCamera
-	local closest, shortest = nil, CONFIG.AimbotFov
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-			local pos, onScreen = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
-			if onScreen then
-				local d = (Vector2.new(pos.X, pos.Y) - UserInputService:GetMouseLocation()).Magnitude
-				if d < shortest then shortest = d closest = p end
+--==================================================================================--
+-- CLEANUP HELPERS
+--==================================================================================--
+
+local function Disconnect(name)
+	local connection = Db.Connections[name]
+
+	if connection then
+		connection:Disconnect()
+		Db.Connections[name] = nil
+	end
+end
+
+local function DestroyInstance(instance)
+	if instance and instance.Parent then
+		instance:Destroy()
+	end
+end
+
+--==================================================================================--
+-- OVERLAY GUI
+--==================================================================================--
+
+local OverlayGui = Instance.new("ScreenGui")
+OverlayGui.Name = "Dexi_Engine_Overlays"
+OverlayGui.ResetOnSpawn = false
+OverlayGui.IgnoreGuiInset = true
+OverlayGui.Parent = PlayerGui
+
+--==================================================================================--
+-- AIM FOV CIRCLE
+--==================================================================================--
+
+local AimCircleFrame = Instance.new("Frame")
+AimCircleFrame.Name = "AimCircle"
+AimCircleFrame.Parent = OverlayGui
+AimCircleFrame.BackgroundTransparency = 1
+AimCircleFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+AimCircleFrame.Visible = false
+
+local AimCircleStroke = Instance.new("UIStroke")
+AimCircleStroke.Parent = AimCircleFrame
+AimCircleStroke.Thickness = 1.5
+AimCircleStroke.Color = Color3.fromRGB(150, 50, 255)
+
+local AimCircleCorner = Instance.new("UICorner")
+AimCircleCorner.Parent = AimCircleFrame
+AimCircleCorner.CornerRadius = UDim.new(1, 0)
+
+--==================================================================================--
+-- TARGET SEARCH
+--==================================================================================--
+
+local function GetClosestTarget()
+	local closest = nil
+	local shortest = Db.SliderValues.AimFov
+
+	local mousePos = UserInputService:GetMouseLocation()
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local character = player.Character
+
+			if character then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				local root = character:FindFirstChild("HumanoidRootPart")
+				local head = character:FindFirstChild("Head")
+
+				if humanoid and root and head and humanoid.Health > 0 then
+					local position, onScreen =
+						Camera:WorldToViewportPoint(root.Position)
+
+					if onScreen then
+						local screenPosition =
+							Vector2.new(position.X, position.Y)
+
+						local distance =
+							(screenPosition - mousePos).Magnitude
+
+						if distance < shortest then
+							shortest = distance
+							closest = player
+						end
+					end
+				end
 			end
 		end
 	end
+
 	return closest
 end
 
---------------------------------------------------------------------------------------
--- ГЕНЕРАЦИЯ ГРАФИЧЕСКОГО ИНТЕРФЕЙСА (UI)
---------------------------------------------------------------------------------------
+--==================================================================================--
+-- NOTIFICATIONS
+--==================================================================================--
+
+local NotifGui = Instance.new("ScreenGui")
+NotifGui.Name = "Dexi_Notifications"
+NotifGui.ResetOnSpawn = false
+NotifGui.IgnoreGuiInset = true
+NotifGui.Parent = PlayerGui
+
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Name = "Container"
+NotifContainer.Parent = NotifGui
+NotifContainer.Size = UDim2.new(0, 300, 0, 500)
+NotifContainer.Position = UDim2.new(1, -310, 1, -510)
+NotifContainer.BackgroundTransparency = 1
+
+local NotifLayout = Instance.new("UIListLayout")
+NotifLayout.Parent = NotifContainer
+NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+NotifLayout.Padding = UDim.new(0, 6)
+
+local function Notify(message)
+	local Card = Instance.new("Frame")
+	Card.Name = "Notification"
+	Card.Size = UDim2.new(0, 0, 0, 38)
+	Card.BackgroundColor3 = Color3.fromRGB(14, 10, 20)
+	Card.BackgroundTransparency = 0.1
+	Card.BorderSizePixel = 0
+	Card.Parent = NotifContainer
+
+	local CardCorner = Instance.new("UICorner")
+	CardCorner.Parent = Card
+	CardCorner.CornerRadius = UDim.new(0, 6)
+
+	local CardStroke = Instance.new("UIStroke")
+	CardStroke.Parent = Card
+	CardStroke.Color = Color3.fromRGB(140, 40, 255)
+	CardStroke.Thickness = 1
+	CardStroke.Enabled = false
+
+	local Text = Instance.new("TextLabel")
+	Text.Parent = Card
+	Text.Size = UDim2.new(1, -20, 1, 0)
+	Text.Position = UDim2.new(0, 10, 0, 0)
+	Text.BackgroundTransparency = 1
+	Text.Text = tostring(message)
+	Text.TextColor3 = Color3.fromRGB(225, 210, 255)
+	Text.Font = Enum.Font.GothamMedium
+	Text.TextSize = 11
+	Text.TextXAlignment = Enum.TextXAlignment.Left
+	Text.Visible = false
+
+	local openTween = TweenService:Create(
+		Card,
+		TweenInfo.new(
+			0.25,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			Size = UDim2.new(0, 280, 0, 38)
+		}
+	)
+
+	openTween:Play()
+
+	openTween.Completed:Connect(function()
+		if Card.Parent then
+			Text.Visible = true
+			CardStroke.Enabled = true
+		end
+	end)
+
+	task.delay(3, function()
+		if not Card.Parent then
+			return
+		end
+
+		Text.Visible = false
+		CardStroke.Enabled = false
+
+		local closeTween = TweenService:Create(
+			Card,
+			TweenInfo.new(
+				0.2,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			),
+			{
+				Size = UDim2.new(0, 0, 0, 0)
+			}
+		)
+
+		closeTween:Play()
+
+		closeTween.Completed:Wait()
+
+		if Card.Parent then
+			Card:Destroy()
+		end
+	end)
+end
+
+--==================================================================================--
+-- MAIN GUI
+--==================================================================================--
+
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DexiScript_Horizontal"
+ScreenGui.Name = "DexiScript_Overload"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = PlayerGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 520, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -260, 0.5, -160)
-MainFrame.BackgroundColor3 = Color3.fromRGB(13, 10, 18)
+MainFrame.Parent = ScreenGui
+MainFrame.Size = UDim2.new(0, 660, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -330, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 7, 14)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10)
 MainCorner.Parent = MainFrame
+MainCorner.CornerRadius = UDim.new(0, 10)
 
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Thickness = 2
-MainStroke.Color = Color3.fromRGB(130, 30, 240)
-MainStroke.Parent = MainFrame
+local Glow = Instance.new("UIStroke")
+Glow.Parent = MainFrame
+Glow.Thickness = 2
+Glow.Color = Color3.fromRGB(140, 40, 255)
+
+--==================================================================================--
+-- HEADER
+--==================================================================================--
 
 local Header = Instance.new("Frame")
 Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 40)
-Header.BackgroundColor3 = Color3.fromRGB(22, 17, 30)
-Header.BorderSizePixel = 0
 Header.Parent = MainFrame
+Header.Size = UDim2.new(1, 0, 0, 45)
+Header.BackgroundColor3 = Color3.fromRGB(18, 13, 26)
+Header.BorderSizePixel = 0
+Header.Active = true
 
 local HeaderCorner = Instance.new("UICorner")
-HeaderCorner.CornerRadius = UDim.new(0, 10)
 HeaderCorner.Parent = Header
+HeaderCorner.CornerRadius = UDim.new(0, 10)
 
 local Title = Instance.new("TextLabel")
+Title.Parent = Header
 Title.Size = UDim2.new(0, 300, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DEXI SCRIPT v3.0 // Monolith"
-Title.TextColor3 = Color3.fromRGB(210, 170, 255)
+Title.Text = "Dexi Script"
+Title.TextColor3 = Color3.fromRGB(230, 195, 255)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 15
+Title.TextSize = 18
 Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = Header
 
-local ControlCluster = Instance.new("Frame")
-ControlCluster.Size = UDim2.new(0, 80, 1, 0)
-ControlCluster.Position = UDim2.new(1, -85, 0, 0)
-ControlCluster.BackgroundTransparency = 1
-ControlCluster.Parent = Header
+local Controls = Instance.new("Frame")
+Controls.Parent = Header
+Controls.Size = UDim2.new(0, 80, 1, 0)
+Controls.Position = UDim2.new(1, -90, 0, 0)
+Controls.BackgroundTransparency = 1
 
-local ContentContainer = Instance.new("Frame")
-ContentContainer.Size = UDim2.new(1, 0, 1, -40)
-ContentContainer.Position = UDim2.new(0, 0, 0, 40)
-ContentContainer.BackgroundTransparency = 1
-ContentContainer.ClipsDescendants = true
-ContentContainer.Parent = MainFrame
+local function TopButton(text, x, color, callback)
+	local button = Instance.new("TextButton")
+	button.Parent = Controls
+	button.Size = UDim2.new(0, 32, 0, 26)
+	button.Position = UDim2.new(0, x, 0.5, -13)
+	button.BackgroundColor3 = Color3.fromRGB(28, 20, 40)
+	button.Text = text
+	button.TextColor3 = color
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 13
+	button.AutoButtonColor = false
 
--- Конструктор кнопок [ — ] и [ X ]
-local function createTopButton(text, xOffset, color, callback)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 30, 0, 26)
-	btn.Position = UDim2.new(0, xOffset, 0.5, -13)
-	btn.BackgroundColor3 = Color3.fromRGB(30, 24, 42)
-	btn.Text = text
-	btn.TextColor3 = color
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 14
-	btn.AutoButtonColor = false
-	btn.Parent = ControlCluster
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-	btn.MouseButton1Click:Connect(callback)
+	local corner = Instance.new("UICorner")
+	corner.Parent = button
+	corner.CornerRadius = UDim.new(0, 6)
+
+	button.MouseButton1Click:Connect(callback)
+
+	return button
 end
 
-local isMinimized = false
-createTopButton("—", 5, Color3.fromRGB(200, 160, 255), function()
-	isMinimized = not isMinimized
-	local targetSize = isMinimized and UDim2.new(0, 520, 0, 40) or UDim2.new(0, 520, 0, 320)
-	TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = targetSize}):Play()
-end)
+local Minimized = false
 
-local function SelfDestruct()
-	for _, c in pairs(Connections) do
-		if type(c) == "table" then for _, v in ipairs(c) do v:Disconnect() end
-		elseif c then c:Disconnect() end
+TopButton(
+	"—",
+	0,
+	Color3.fromRGB(200, 150, 255),
+	function()
+		Minimized = not Minimized
+
+		local targetSize
+
+		if Minimized then
+			targetSize = UDim2.new(0, 660, 0, 45)
+		else
+			targetSize = UDim2.new(0, 660, 0, 420)
+		end
+
+		TweenService:Create(
+			MainFrame,
+			TweenInfo.new(0.3),
+			{
+				Size = targetSize
+			}
+		):Play()
+
+		Notify(
+			Minimized
+				and "Панель свернута"
+				or "Панель развернута"
+		)
 	end
-	local hrp, hum = GetRoot(), GetHum()
-	if hrp and hrp:FindFirstChild("DexiFly") then hrp.DexiFly:Destroy() end
-	if hrp and hrp:FindFirstChild("DexiSpin") then hrp.DexiSpin:Destroy() end
-	if hum then hum.PlatformStand = false end
-	Lighting.Ambient = Color3.fromRGB(128, 128, 128)
-	ScreenGui:Destroy()
-end
+)
 
-createTopButton("X", 45, Color3.fromRGB(255, 70, 100), SelfDestruct)
-
-local Sidebar = Instance.new("Frame")
-Sidebar.Size = UDim2.new(0, 120, 1, 0)
-Sidebar.BackgroundColor3 = Color3.fromRGB(18, 14, 25)
-Sidebar.BorderSizePixel = 0
-Sidebar.Parent = ContentContainer
-
-Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 8)
-
-local TabList = Instance.new("UIListLayout")
-TabList.Padding = UDim.new(0, 6)
-TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-TabList.SortOrder = Enum.SortOrder.LayoutOrder
-TabList.Parent = Sidebar
-
-local TabContentFrame = Instance.new("Frame")
-TabContentFrame.Size = UDim2.new(1, -135, 1, -15)
-TabContentFrame.Position = UDim2.new(0, 130, 0, 10)
-TabContentFrame.BackgroundTransparency = 1
-TabContentFrame.Parent = ContentContainer
-
---------------------------------------------------------------------------------------
--- АВТОМАТИЗАЦИЯ СБОРКИ ЭЛЕМЕНТОВ
---------------------------------------------------------------------------------------
-local firstTab = true
-local function RegisterTab(tabName, layoutOrder)
-	local TabBtn = Instance.new("TextButton")
-	TabBtn.Size = UDim2.new(0, 105, 0, 32)
-	TabBtn.BackgroundColor3 = Color3.fromRGB(26, 20, 35)
-	TabBtn.Text = tabName
-	TabBtn.TextColor3 = Color3.fromRGB(160, 150, 180)
-	TabBtn.Font = Enum.Font.GothamMedium
-	TabBtn.TextSize = 12
-	TabBtn.LayoutOrder = layoutOrder
-	TabBtn.Parent = Sidebar
-	Instance.new("UICorner", TabBtn).CornerRadius = UDim.new(0, 6)
-	
-	local ScrollContainer = Instance.new("ScrollingFrame")
-	ScrollContainer.Size = UDim2.new(1, 0, 1, 0)
-	ScrollContainer.BackgroundTransparency = 1
-	ScrollContainer.BorderSizePixel = 0
-	ScrollContainer.ScrollBarThickness = 3
-	ScrollContainer.ScrollBarImageColor3 = Color3.fromRGB(130, 30, 240)
-	ScrollContainer.Visible = firstTab
-	ScrollContainer.Parent = TabContentFrame
-	
-	local List = Instance.new("UIListLayout")
-	List.Padding = UDim.new(0, 6)
-	List.SortOrder = Enum.SortOrder.LayoutOrder
-	List.Parent = ScrollContainer
-	
-	List:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		ScrollContainer.CanvasSize = UDim2.new(0, 0, 0, List.AbsoluteContentSize.Y + 10)
-	end)
-	
-	if firstTab then
-		TabBtn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
-		TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		firstTab = false
-	end
-	
-	Tabs[tabName] = ScrollContainer
-	
-	TabBtn.MouseButton1Click:Connect(function()
-		for _, sc in pairs(Tabs) do sc.Visible = false end
-		for _, b in ipairs(Sidebar:GetChildren()) do
-			if b:IsA("TextButton") then
-				b.BackgroundColor3 = Color3.fromRGB(26, 20, 35)
-				b.TextColor3 = Color3.fromRGB(160, 150, 180)
+TopButton(
+	"X",
+	40,
+	Color3.fromRGB(255, 75, 105),
+	function()
+		for _, connection in pairs(Db.Connections) do
+			if connection then
+				connection:Disconnect()
 			end
 		end
-		ScrollContainer.Visible = true
-		TabBtn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
-		TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+		for _, object in pairs(Db.EspCache) do
+			DestroyInstance(object)
+		end
+
+		for _, object in pairs(Db.BoxCache) do
+			DestroyInstance(object)
+		end
+
+		for _, object in pairs(Db.LinesCache) do
+			DestroyInstance(object)
+		end
+
+		Db.Connections = {}
+		Db.EspCache = {}
+		Db.BoxCache = {}
+		Db.LinesCache = {}
+
+		DestroyInstance(NotifGui)
+		DestroyInstance(OverlayGui)
+		DestroyInstance(ScreenGui)
+	end
+)
+
+--==================================================================================--
+-- CONTENT
+--==================================================================================--
+
+local Content = Instance.new("Frame")
+Content.Name = "Content"
+Content.Parent = MainFrame
+Content.Size = UDim2.new(1, 0, 1, -45)
+Content.Position = UDim2.new(0, 0, 0, 45)
+Content.BackgroundTransparency = 1
+Content.ClipsDescendants = true
+
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = "Sidebar"
+Sidebar.Parent = Content
+Sidebar.Size = UDim2.new(0, 140, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 11, 22)
+Sidebar.BorderSizePixel = 0
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.Parent = Sidebar
+SidebarCorner.CornerRadius = UDim.new(0, 8)
+
+local TabList = Instance.new("UIListLayout")
+TabList.Parent = Sidebar
+TabList.Padding = UDim.new(0, 4)
+TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabList.SortOrder = Enum.SortOrder.LayoutOrder
+
+local TabContainer = Instance.new("Frame")
+TabContainer.Name = "TabContainer"
+TabContainer.Parent = Content
+TabContainer.Size = UDim2.new(1, -165, 1, -20)
+TabContainer.Position = UDim2.new(0, 155, 0, 10)
+TabContainer.BackgroundTransparency = 1
+
+--==================================================================================--
+-- TAB SYSTEM
+--==================================================================================--
+
+local InitialTab = true
+
+local function RegisterTab(name, order)
+	local button = Instance.new("TextButton")
+	button.Name = name .. "Button"
+	button.Parent = Sidebar
+	button.Size = UDim2.new(0, 125, 0, 32)
+	button.BackgroundColor3 = Color3.fromRGB(24, 18, 34)
+	button.Text = name
+	button.TextColor3 = Color3.fromRGB(150, 140, 170)
+	button.Font = Enum.Font.GothamMedium
+	button.TextSize = 12
+	button.LayoutOrder = order
+	button.AutoButtonColor = false
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.Parent = button
+	buttonCorner.CornerRadius = UDim.new(0, 6)
+
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Name = name .. "Page"
+	scroll.Parent = TabContainer
+	scroll.Size = UDim2.new(1, 0, 1, 0)
+	scroll.BackgroundTransparency = 1
+	scroll.BorderSizePixel = 0
+	scroll.ScrollBarThickness = 3
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 40, 255)
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.Visible = InitialTab
+
+	local layout = Instance.new("UIListLayout")
+	layout.Parent = scroll
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		scroll.CanvasSize = UDim2.new(
+			0,
+			0,
+			0,
+			layout.AbsoluteContentSize.Y + 10
+		)
+	end)
+
+	if InitialTab then
+		button.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
+		button.TextColor3 = Color3.fromRGB(255, 255, 255)
+		InitialTab = false
+	end
+
+	Db.Tabs[name] = scroll
+
+	button.MouseButton1Click:Connect(function()
+		for _, page in pairs(Db.Tabs) do
+			page.Visible = false
+		end
+
+		for _, child in ipairs(Sidebar:GetChildren()) do
+			if child:IsA("TextButton") then
+				child.BackgroundColor3 = Color3.fromRGB(24, 18, 34)
+				child.TextColor3 = Color3.fromRGB(150, 140, 170)
+			end
+		end
+
+		scroll.Visible = true
+		button.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
+		button.TextColor3 = Color3.fromRGB(255, 255, 255)
 	end)
 end
 
-local function AddButton(tabName, text, stateKey, callback)
-	local targetContainer = Tabs[tabName]
-	States[stateKey] = false
-	local Btn = Instance.new("TextButton")
-	Btn.Size = UDim2.new(1, -5, 0, 34)
-	Btn.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
-	Btn.Text = text
-	Btn.TextColor3 = Color3.fromRGB(190, 190, 190)
-	Btn.Font = Enum.Font.GothamMedium
-	Btn.TextSize = 12
-	Btn.AutoButtonColor = false
-	Btn.Parent = targetContainer
-	Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
-	local stroke = Instance.new("UIStroke", Btn)
-	stroke.Color = Color3.fromRGB(45, 38, 55)
-	
-	Btn.MouseButton1Click:Connect(function()
-		States[stateKey] = not States[stateKey]
-		callback(States[stateKey])
-		if States[stateKey] then
-			Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-			Btn.BackgroundColor3 = Color3.fromRGB(110, 30, 200)
-			stroke.Color = Color3.fromRGB(180, 80, 255)
+--==================================================================================--
+-- BUTTON
+--==================================================================================--
+
+local function AddButton(tab, text, key, callback)
+	local parent = Db.Tabs[tab]
+
+	if not parent then
+		warn("Dexi: tab not found:", tab)
+		return
+	end
+
+	Db.States[key] = false
+
+	local row = Instance.new("Frame")
+	row.Name = key .. "Row"
+	row.Parent = parent
+	row.Size = UDim2.new(1, -5, 0, 36)
+	row.BackgroundTransparency = 1
+
+	local button = Instance.new("TextButton")
+	button.Name = "Button"
+	button.Parent = row
+	button.Size = UDim2.new(1, -55, 1, 0)
+	button.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
+	button.Text = text
+	button.TextColor3 = Color3.fromRGB(180, 180, 180)
+	button.Font = Enum.Font.GothamMedium
+	button.TextSize = 12
+	button.AutoButtonColor = false
+
+	local corner = Instance.new("UICorner")
+	corner.Parent = button
+	corner.CornerRadius = UDim.new(0, 6)
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Parent = button
+	stroke.Color = Color3.fromRGB(45, 35, 60)
+
+	local bindButton = Instance.new("TextButton")
+	bindButton.Name = "Bind"
+	bindButton.Parent = row
+	bindButton.Size = UDim2.new(0, 50, 1, 0)
+	bindButton.Position = UDim2.new(1, -50, 0, 0)
+	bindButton.BackgroundColor3 = Color3.fromRGB(20, 15, 28)
+	bindButton.Text = "NONE"
+	bindButton.TextColor3 = Color3.fromRGB(140, 120, 160)
+	bindButton.Font = Enum.Font.GothamBold
+	bindButton.TextSize = 10
+	bindButton.AutoButtonColor = false
+
+	local bindCorner = Instance.new("UICorner")
+	bindCorner.Parent = bindButton
+	bindCorner.CornerRadius = UDim.new(0, 6)
+
+	local bindStroke = Instance.new("UIStroke")
+	bindStroke.Parent = bindButton
+	bindStroke.Color = Color3.fromRGB(45, 35, 60)
+
+	local function TriggerAction()
+		Db.States[key] = not Db.States[key]
+
+		callback(Db.States[key])
+
+		if Db.States[key] then
+			button.TextColor3 = Color3.fromRGB(255, 255, 255)
+			button.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
+			stroke.Color = Color3.fromRGB(200, 100, 255)
+
+			Notify("Включено: " .. text)
 		else
-			Btn.TextColor3 = Color3.fromRGB(190, 190, 190)
-			Btn.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
-			stroke.Color = Color3.fromRGB(45, 38, 55)
+			button.TextColor3 = Color3.fromRGB(180, 180, 180)
+			button.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
+			stroke.Color = Color3.fromRGB(45, 35, 60)
+
+			Notify("Выключено: " .. text)
+		end
+	end
+
+	button.MouseButton1Click:Connect(TriggerAction)
+
+	Db.Keybinds[key] = {
+		Button = bindButton,
+		Action = TriggerAction,
+		Key = nil
+	}
+
+	bindButton.MouseButton1Click:Connect(function()
+		bindButton.Text = "..."
+		BindingKey = key
+		BindingButton = bindButton
+	end)
+end
+
+--==================================================================================--
+-- SLIDER
+--==================================================================================--
+
+local function AddSlider(tab, name, minimum, maximum, default, key, callback)
+	local parent = Db.Tabs[tab]
+
+	if not parent then
+		warn("Dexi: tab not found:", tab)
+		return
+	end
+
+	local background = Instance.new("Frame")
+	background.Name = key .. "Slider"
+	background.Parent = parent
+	background.Size = UDim2.new(1, -5, 0, 44)
+	background.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
+	background.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.Parent = background
+	corner.CornerRadius = UDim.new(0, 6)
+
+	local label = Instance.new("TextLabel")
+	label.Parent = background
+	label.Size = UDim2.new(1, -16, 0, 18)
+	label.Position = UDim2.new(0, 8, 0, 2)
+	label.BackgroundTransparency = 1
+	label.Text = name .. ": " .. tostring(default)
+	label.TextColor3 = Color3.fromRGB(170, 160, 180)
+	label.Font = Enum.Font.GothamSemibold
+	label.TextSize = 11
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local track = Instance.new("Frame")
+	track.Name = "Track"
+	track.Parent = background
+	track.Size = UDim2.new(1, -16, 0, 4)
+	track.Position = UDim2.new(0, 8, 0, 28)
+	track.BackgroundColor3 = Color3.fromRGB(45, 35, 55)
+	track.BorderSizePixel = 0
+
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.Parent = track
+	trackCorner.CornerRadius = UDim.new(1, 0)
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Parent = track
+	fill.Size = UDim2.new(
+		math.clamp(
+			(default - minimum) / (maximum - minimum),
+			0,
+			1
+		),
+		0,
+		1,
+		0
+	)
+	fill.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
+	fill.BorderSizePixel = 0
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.Parent = fill
+	fillCorner.CornerRadius = UDim.new(1, 0)
+
+	Db.SliderValues[key] = default
+
+	local dragging = false
+
+	local function Update(input)
+		local width = track.AbsoluteSize.X
+
+		if width <= 0 then
+			return
+		end
+
+		local relativeX =
+			(input.Position.X - track.AbsolutePosition.X) / width
+
+		local ratio = math.clamp(relativeX, 0, 1)
+
+		local value =
+			math.floor(
+				minimum + (maximum - minimum) * ratio
+			)
+
+		fill.Size = UDim2.new(ratio, 0, 1, 0)
+
+		label.Text = name .. ": " .. tostring(value)
+
+		Db.SliderValues[key] = value
+
+		callback(value)
+	end
+
+	track.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			Update(input)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging
+			and input.UserInputType == Enum.UserInputType.MouseMovement then
+
+			Update(input)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if dragging then
+				dragging = false
+
+				Notify(
+					name
+						.. " -> "
+						.. tostring(Db.SliderValues[key])
+				)
+			end
 		end
 	end)
 end
 
-local function AddSlider(tabName, name, min, max, default, callback)
-	local targetContainer = Tabs[tabName]
-	local SliderBg = Instance.new("Frame")
-	SliderBg.Size = UDim2.new(1, -5, 0, 42)
-	SliderBg.BackgroundColor3 = Color3.fromRGB(25, 20, 32)
-	SliderBg.Parent = targetContainer
-	Instance.new("UICorner", SliderBg).CornerRadius = UDim.new(0, 6)
-	
-	local Label = Instance.new("TextLabel")
-	Label.Size = UDim2.new(1, -16, 0, 18)
-	Label.Position = UDim2.new(0, 8, 0, 2)
-	Label.BackgroundTransparency = 1
-	Label.Text = name .. ": " .. tostring(default)
-	Label.TextColor3 = Color3.fromRGB(170, 160, 180)
-	Label.Font = Enum.Font.GothamSemibold
-	Label.TextSize = 11
-	Label.TextXAlignment = Enum.TextXAlignment.Left
-	Label.Parent = SliderBg
-	
-	local Track = Instance.new("Frame")
-	Track.Size = UDim2.new(1, -16, 0, 4)
+--==================================================================================--
+-- KEYBINDS
+--==================================================================================--
 
+Db.Connections.Keybinds = UserInputService.InputBegan:Connect(
+	function(input, processed)
+		if processed then
+			return
+		end
 
+		if BindingKey and BindingButton then
+			local bindData = Db.Keybinds[BindingKey]
 
+			if not bindData then
+				BindingKey = nil
+				BindingButton = nil
+				return
+			end
 
-Track.Position = UDim2.new(0, 8, 0, 26)
-Track.BackgroundColor3 = Color3.fromRGB(45, 35, 55)
-Track.BorderSizePixel = 0
-Track.Parent = SliderBg
+			if input.KeyCode == Enum.KeyCode.Backspace then
+				bindData.Key = nil
+				BindingButton.Text = "NONE"
+				Notify("Бинд сброшен")
+			elseif input.KeyCode ~= Enum.KeyCode.Unknown then
+				bindData.Key = input.KeyCode
 
-local Fill = Instance.new("Frame")
-Fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
-Fill.BackgroundColor3 = Color3.fromRGB(130, 30, 240)
-Fill.BorderSizePixel = 0
-Fill.Parent = Track
+				local keyName = input.KeyCode.Name
+				BindingButton.Text = string.sub(keyName, 1, 5)
 
-local dragging = false
-local function update(input)
-local relX = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
-Fill.Size = UDim2.new(relX, 0, 1, 0)
-local val = math.floor(min + (max - min) * relX)
-Label.Text = name .. ": " .. tostring(val)
-callback(val)
-end
-Track.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true update(i) end end)
-UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then update(i) end end)
-UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
-end
+				Notify("Назначена клавиша: " .. keyName)
+			end
 
+			BindingKey = nil
+			BindingButton = nil
 
+			return
+		end
+
+		for _, bindData in pairs(Db.Keybinds) do
+			if bindData.Key
+				and input.KeyCode == bindData.Key then
+
+				bindData.Action()
+			end
+		end
+	end
+)
+
+--==================================================================================--
+-- REGISTER TABS
+--==================================================================================--
 
 RegisterTab("Combat", 1)
 RegisterTab("Movement", 2)
 RegisterTab("Visuals", 3)
-RegisterTab("Misc", 4)
+RegisterTab("Exploits", 4)
+RegisterTab("World & Misc", 5)
 
+--==================================================================================--
 -- COMBAT
-AddButton("Combat", "AimBot (Наведение на головы)", "Aimbot", function(state)
-if state then
-Connections.Aimbot = RunService.RenderStepped:Connect(function()
-local target = GetClosestPlayer()
-if target and target.Character:FindFirstChild("Head") then
-Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, target.Character.Head.Position), CONFIG.AimbotSmoothness)
-end
-end)
-else
-if Connections.Aimbot then Connections.Aimbot:Disconnect() Connections.Aimbot = nil end
-end
-end)
+--==================================================================================--
 
-AddButton("Combat", "TriggerBot (Автовыстрел на врагах)", "Trigger", function(state)
-if state then
-Connections.Trigger = RunService.RenderStepped:Connect(function()
-local mouse = LocalPlayer:GetMouse()
-if mouse.Target and mouse.Target.Parent:FindFirstChildOfClass("Humanoid") then
-local t = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-if t then t:Activate() end
-end
-end)
-else
-if Connections.Trigger then Connections.Trigger:Disconnect() Connections.Trigger = nil end
-end
-end)
+AddButton(
+	"Combat",
+	"AimBot Head (Слежение головы)",
+	"Aimbot",
+	function(state)
 
+		if state then
+			Disconnect("Aimbot")
+
+			Db.Connections.Aimbot =
+				RunService.RenderStepped:Connect(function()
+
+					if not Camera then
+						Camera = workspace.CurrentCamera
+					end
+
+					local mousePos =
+						UserInputService:GetMouseLocation()
+
+					AimCircleFrame.Position =
+						UDim2.new(
+							0,
+							mousePos.X,
+							0,
+							mousePos.Y
+						)
+
+					AimCircleFrame.Size =
+						UDim2.new(
+							0,
+							Db.SliderValues.AimFov * 2,
+							0,
+							Db.SliderValues.AimFov * 2
+						)
+
+					AimCircleFrame.Visible = true
+
+					local target = GetClosestTarget()
+
+					if target
+						and target.Character then
+
+						local head =
+							target.Character:FindFirstChild("Head")
+
+						if head then
+							local targetCFrame =
+								CFrame.new(
+									Camera.CFrame.Position,
+									head.Position
+								)
+
+							Camera.CFrame =
+								Camera.CFrame:Lerp(
+									targetCFrame,
+									0.08
+								)
+						end
+					end
+				end)
+		else
+			Disconnect("Aimbot")
+			AimCircleFrame.Visible = false
+		end
+	end
+)
+
+AddSlider(
+	"Combat",
+	"Aim FOV",
+	30,
+	400,
+	150,
+	"AimFov",
+	function()
+	end
+)
+
+AddButton(
+	"Combat",
+	"TriggerBot (Авто-Клик)",
+	"Trigger",
+	function(state)
+
+		if state then
+			Disconnect("Trigger")
+
+			Db.Connections.Trigger =
+				RunService.RenderStepped:Connect(function()
+
+					local mouse =
+						LocalPlayer:GetMouse()
+
+					if mouse.Target then
+						local model =
+							mouse.Target:FindFirstAncestorOfClass("Model")
+
+						if model
+							and model:FindFirstChildOfClass("Humanoid") then
+
+							local character =
+								LocalPlayer.Character
+
+							local tool =
+								character
+								and character:FindFirstChildOfClass("Tool")
+
+							if tool then
+								tool:Activate()
+							end
+						end
+					end
+				end)
+		else
+			Disconnect("Trigger")
+		end
+	end
+)
+
+AddButton(
+	"Combat",
+	"Hitbox Expander",
+	"Hitbox",
+	function(state)
+
+		if state then
+			Disconnect("Hitbox")
+
+			Db.Connections.Hitbox =
+				RunService.Heartbeat:Connect(function()
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							local head =
+								player.Character:FindFirstChild("Head")
+
+							if head then
+								local size =
+									Db.SliderValues.HitboxSize
+
+								head.Size =
+									Vector3.new(
+										size,
+										size,
+										size
+									)
+
+								head.CanCollide = false
+							end
+						end
+					end
+				end)
+		else
+			Disconnect("Hitbox")
+
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer
+					and player.Character then
+
+					local head =
+						player.Character:FindFirstChild("Head")
+
+					if head then
+						head.Size =
+							Vector3.new(2, 1, 1)
+
+						head.CanCollide = false
+					end
+				end
+			end
+		end
+	end
+)
+
+AddSlider(
+	"Combat",
+	"Размер хитбокса головы",
+	2,
+	15,
+	2,
+	"HitboxSize",
+	function()
+	end
+)
+
+--==================================================================================--
 -- MOVEMENT
-AddSlider("Movement", "Скорость (WalkSpeed)", 16, 250, 16, function(v)
-SliderValues.CurrentSpeed = v
-local h = GetHum() if h then h.WalkSpeed = v end
-end)
+--==================================================================================--
 
-AddSlider("Movement", "Прыжок (JumpPower)", 50, 300, 50, function(v)
-SliderValues.CurrentJump = v
-local h = GetHum() if h then h.UseJumpPower = true h.JumpPower = v end
-end)
+AddSlider(
+	"Movement",
+	"Скорость WalkSpeed",
+	16,
+	250,
+	16,
+	"Speed",
+	function(value)
 
-AddButton("Movement", "Fly Mod (Полет по камере)", "Fly", function(state)
-local hrp, hum = GetRoot(), GetHum()
-if state and hrp and hum then
-local bv = Instance.new("BodyVelocity")
-bv.Name = "DexiFly"
-bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-bv.Parent = hrp
-hum.PlatformStand = true
-Connections.Fly = RunService.RenderStepped:Connect(function()
-bv.Velocity = hum.MoveDirection.Magnitude > 0 and Camera.CFrame.LookVector * (hum.MoveDirection.Magnitude * CONFIG.FlySpeed) or Vector3.new(0,0,0)
-end)
-else
-if Connections.Fly then Connections.Fly:Disconnect() Connections.Fly = nil end
-if hrp and hrp:FindFirstChild("DexiFly") then hrp.DexiFly:Destroy() end
-if hum then hum.PlatformStand = false end
-end
-end)
+		local humanoid = GetHumanoid and GetHumanoid()
 
-AddButton("Movement", "Noclip By Key (Зажмите Ctrl для стен)", "NoclipKey", function(state)
-if state then
-Connections.NoclipKey = RunService.Stepped:Connect(function()
-if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and LocalPlayer.Character then
-for _, p in ipairs(LocalPlayer.Character:GetChildren()) do
-if p:IsA("BasePart") then p.CanCollide = false end
-end
-end
-end)
-else
-if Connections.NoclipKey then Connections.NoclipKey:Disconnect() Connections.NoclipKey = nil end
-end
-end)
+		if not humanoid then
+			humanoid = GetHum()
+		end
 
-AddButton("Movement", "Infinite Jump (Бесконечный прыжок)", "InfJump", function(state)
-if state then
-Connections.InfJump = UserInputService.InputBegan:Connect(function(i, p)
-if not p and i.KeyCode == Enum.KeyCode.Space then
-local h = GetHum() if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-end
-end)
-else
-if Connections.InfJump then Connections.InfJump:Disconnect() Connections.InfJump = nil end
-end
-end)
+		if humanoid then
+			humanoid.WalkSpeed = value
+		end
+	end
+)
 
-AddButton("Movement", "BunnyHop (Авто-распрыжка)", "Bhop", function(state)
-if state then
-Connections.Bhop = RunService.RenderStepped:Connect(function()
-if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-local h = GetHum() if h and h.FloorMaterial ~= Enum.Material.Air then h.Jump = true end
-end
-end)
-else
-if Connections.Bhop then Connections.Bhop:Disconnect() Connections.Bhop = nil end
-end
-end)
+AddSlider(
+	"Movement",
+	"Прыжок JumpPower",
+	50,
+	350,
+	50,
+	"Jump",
+	function(value)
 
+		local humanoid = GetHum()
+
+		if humanoid then
+			humanoid.UseJumpPower = true
+			humanoid.JumpPower = value
+		end
+	end
+)
+
+AddSlider(
+	"Movement",
+	"Скорость полета",
+	20,
+	300,
+	60,
+	"FlySpeed",
+	function()
+	end
+)
+
+AddButton(
+	"Movement",
+	"No-Clip Fly Hybrid",
+	"Fly",
+	function(state)
+
+		local root = GetRoot()
+		local humanoid = GetHum()
+
+		if state and root and humanoid then
+			Disconnect("Fly")
+
+			local oldVelocity =
+				root:FindFirstChild("DexiOverloadFly")
+
+			if oldVelocity then
+				oldVelocity:Destroy()
+			end
+
+			local velocity =
+				Instance.new("BodyVelocity")
+
+			velocity.Name = "DexiOverloadFly"
+			velocity.MaxForce =
+				Vector3.new(
+					math.huge,
+					math.huge,
+					math.huge
+				)
+
+			velocity.Velocity =
+				Vector3.zero
+
+			velocity.Parent = root
+
+			humanoid.PlatformStand = true
+
+			Db.Connections.Fly =
+				RunService.RenderStepped:Connect(function()
+
+					if not root.Parent then
+						Disconnect("Fly")
+						return
+					end
+
+					local direction = Vector3.zero
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+						direction += Camera.CFrame.LookVector
+					end
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+						direction -= Camera.CFrame.LookVector
+					end
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+						direction -= Camera.CFrame.RightVector
+					end
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+						direction += Camera.CFrame.RightVector
+					end
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+						direction += Vector3.new(0, 1, 0)
+					end
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+						direction -= Vector3.new(0, 1, 0)
+					end
+
+					if direction.Magnitude > 0 then
+						velocity.Velocity =
+							direction.Unit
+							* Db.SliderValues.FlySpeed
+					else
+						velocity.Velocity =
+							Vector3.zero
+					end
+
+					local character =
+						LocalPlayer.Character
+
+					if character then
+						for _, part in ipairs(character:GetDescendants()) do
+							if part:IsA("BasePart") then
+								part.CanCollide = false
+							end
+						end
+					end
+				end)
+		else
+			Disconnect("Fly")
+
+			if root then
+				local velocity =
+					root:FindFirstChild("DexiOverloadFly")
+
+				if velocity then
+					velocity:Destroy()
+				end
+			end
+
+			if humanoid then
+				humanoid.PlatformStand = false
+			end
+		end
+	end
+)
+
+AddButton(
+	"Movement",
+	"Toggle Noclip",
+	"Noclip",
+	function(state)
+
+		if state then
+			Disconnect("Noclip")
+
+			Db.Connections.Noclip =
+				RunService.Stepped:Connect(function()
+
+					local character =
+						LocalPlayer.Character
+
+					if character then
+						for _, part in ipairs(character:GetDescendants()) do
+							if part:IsA("BasePart") then
+								part.CanCollide = false
+							end
+						end
+					end
+				end)
+		else
+			Disconnect("Noclip")
+		end
+	end
+)
+
+AddButton(
+	"Movement",
+	"Velocity BHop",
+	"Bhop",
+	function(state)
+
+		if state then
+			Disconnect("Bhop")
+
+			Db.Connections.Bhop =
+				RunService.PreSimulation:Connect(function()
+
+					if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+						local humanoid = GetHum()
+
+						if humanoid
+							and humanoid.FloorMaterial
+								~= Enum.Material.Air then
+
+							humanoid:ChangeState(
+								Enum.HumanoidStateType.Jumping
+							)
+						end
+					end
+				end)
+		else
+			Disconnect("Bhop")
+		end
+	end
+)
+
+AddButton(
+	"Movement",
+	"Infinite Jump",
+	"InfJump",
+	function(state)
+
+		if state then
+			Disconnect("InfJump")
+
+			Db.Connections.InfJump =
+				UserInputService.InputBegan:Connect(
+					function(input, processed)
+
+						if processed then
+							return
+						end
+
+						if input.KeyCode
+							== Enum.KeyCode.Space then
+
+							local humanoid = GetHum()
+
+							if humanoid then
+								humanoid:ChangeState(
+									Enum.HumanoidStateType.Jumping
+								)
+							end
+						end
+					end
+				)
+		else
+			Disconnect("InfJump")
+		end
+	end
+)
+
+AddButton(
+	"Movement",
+	"Auto-Anchoring",
+	"Anchor",
+	function(state)
+
+		local root = GetRoot()
+
+		if root then
+			root.Anchored = state
+		end
+	end
+)
+
+--==================================================================================--
 -- VISUALS
-AddButton("Visuals", "WallHack ESP (Подсветка игроков)", "Esp", function(state)
-local function apply(p)
-if p == LocalPlayer then return end
-local function addhl(char)
-if char:FindFirstChild("DexiESP") then return end
-local hl = Instance.new("Highlight")
-hl.Name = "DexiESP"
-hl.FillColor = Color3.fromRGB(140, 20, 255)
-hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-hl.Parent = char
+--==================================================================================--
+
+local function RemoveESP(playerName)
+	local esp = Db.EspCache[playerName]
+	local box = Db.BoxCache[playerName]
+	local line = Db.LinesCache[playerName]
+
+	DestroyInstance(esp)
+	DestroyInstance(box)
+	DestroyInstance(line)
+
+	Db.EspCache[playerName] = nil
+	Db.BoxCache[playerName] = nil
+	Db.LinesCache[playerName] = nil
 end
-if p.Character then addhl(p.Character) end
-table.insert(Connections.Esp, p.CharacterAdded:Connect(addhl))
+
+local function RenderVisuals(player)
+	if player == LocalPlayer then
+		return
+	end
+
+	RemoveESP(player.Name)
+
+	local characterConnection
+
+	local function InitCharacter(character)
+		RemoveESP(player.Name)
+
+		local head =
+			character:WaitForChild("Head", 5)
+
+		local humanoid =
+			character:FindFirstChildOfClass("Humanoid")
+
+		if not head or not humanoid then
+			return
+		end
+
+		local billboard =
+			Instance.new("BillboardGui")
+
+		billboard.Name = "DexiOverEsp"
+		billboard.Adornee = head
+		billboard.Size =
+			UDim2.new(0, 150, 0, 50)
+
+		billboard.AlwaysOnTop = true
+		billboard.Parent = head
+
+		local label =
+			Instance.new("TextLabel")
+
+		label.Parent = billboard
+		label.Size =
+			UDim2.new(1, 0, 0, 20)
+
+		label.BackgroundTransparency = 1
+		label.TextColor3 =
+			Color3.fromRGB(155, 65, 255)
+
+		label.Font = Enum.Font.GothamBold
+		label.TextSize = 10
+
+		local healthBackground =
+			Instance.new("Frame")
+
+		healthBackground.Parent = billboard
+		healthBackground.Size =
+			UDim2.new(0, 80, 0, 4)
+
+		healthBackground.Position =
+			UDim2.new(0.5, -40, 0, 22)
+
+		healthBackground.BackgroundColor3 =
+			Color3.fromRGB(30, 15, 35)
+
+		healthBackground.BorderSizePixel = 0
+
+		local healthFill =
+			Instance.new("Frame")
+
+		healthFill.Parent = healthBackground
+		healthFill.Size =
+			UDim2.new(1, 0, 1, 0)
+
+		healthFill.BackgroundColor3 =
+			Color3.fromRGB(0, 255, 120)
+
+		healthFill.BorderSizePixel = 0
+
+		local boxFrame =
+			Instance.new("Frame")
+
+		boxFrame.Name =
+			"DexiBox_" .. player.Name
+
+		boxFrame.Parent = OverlayGui
+		boxFrame.BackgroundTransparency = 1
+		boxFrame.BorderSizePixel = 0
+		boxFrame.Visible = false
+
+		local boxStroke =
+			Instance.new("UIStroke")
+
+		boxStroke.Parent = boxFrame
+		boxStroke.Color =
+			Color3.fromRGB(140, 40, 255)
+
+		boxStroke.Thickness = 1
+
+		local lineFrame =
+			Instance.new("Frame")
+
+		lineFrame.Name =
+			"DexiLine_" .. player.Name
+
+		lineFrame.Parent = OverlayGui
+		lineFrame.BackgroundColor3 =
+			Color3.fromRGB(140, 40, 255)
+
+		lineFrame.BorderSizePixel = 0
+		lineFrame.AnchorPoint =
+			Vector2.new(0.5, 0.5)
+
+		lineFrame.Visible = false
+
+		Db.EspCache[player.Name] = billboard
+		Db.BoxCache[player.Name] = boxFrame
+		Db.LinesCache[player.Name] = lineFrame
+
+		local renderConnection
+
+		renderConnection =
+			RunService.RenderStepped:Connect(function()
+
+				if not Db.States.EspCore then
+					renderConnection:Disconnect()
+					RemoveESP(player.Name)
+					return
+				end
+
+				if not character.Parent then
+					renderConnection:Disconnect()
+					RemoveESP(player.Name)
+					return
+				end
+
+				local currentHumanoid =
+					character:FindFirstChildOfClass("Humanoid")
+
+				local root =
+					character:FindFirstChild("HumanoidRootPart")
+
+				local localRoot =
+					LocalPlayer.Character
+					and LocalPlayer.Character:FindFirstChild(
+						"HumanoidRootPart"
+					)
+
+				if not currentHumanoid
+					or not root
+					or not localRoot then
+
+					boxFrame.Visible = false
+					lineFrame.Visible = false
+					return
+				end
+
+				local position, onScreen =
+					Camera:WorldToViewportPoint(
+						root.Position
+					)
+
+				local distance =
+					math.floor(
+						(root.Position - localRoot.Position)
+							.Magnitude
+					)
+
+				label.Text =
+					string.format(
+						"%s (%dm)",
+						player.Name,
+						distance
+					)
+
+				local health =
+					math.clamp(
+						currentHumanoid.Health
+							/ math.max(
+								currentHumanoid.MaxHealth,
+								1
+							),
+						0,
+						1
+					)
+
+				healthFill.Size =
+					UDim2.new(
+						health,
+						0,
+						1,
+						0
+					)
+
+				if onScreen
+					and position.Z > 0
+					and Db.States.EspBox then
+
+					local sizeX =
+						math.clamp(
+							2000 / position.Z,
+							20,
+							500
+						)
+
+					local sizeY =
+						math.clamp(
+							3500 / position.Z,
+							30,
+							700
+						)
+
+					boxFrame.Size =
+						UDim2.new(
+							0,
+							sizeX,
+							0,
+							sizeY
+						)
+
+					boxFrame.Position =
+						UDim2.new(
+							0,
+							position.X - sizeX / 2,
+							0,
+							position.Y - sizeY / 2
+						)
+
+					boxFrame.Visible = true
+				else
+					boxFrame.Visible = false
+				end
+
+				if onScreen
+					and position.Z > 0
+					and Db.States.EspLines then
+
+					local startX =
+						Camera.ViewportSize.X / 2
+
+					local startY =
+						Camera.ViewportSize.Y
+
+					local endX = position.X
+					local endY = position.Y
+
+					local dx = endX - startX
+					local dy = endY - startY
+
+					local length =
+						math.sqrt(
+							dx * dx + dy * dy
+						)
+
+					lineFrame.Size =
+						UDim2.new(
+							0,
+							length,
+							0,
+							1
+						)
+
+					lineFrame.Position =
+						UDim2.new(
+							0,
+							(startX + endX) / 2,
+							0,
+							(startY + endY) / 2
+						)
+
+					lineFrame.Rotation =
+						math.deg(
+							math.atan2(dy, dx)
+						)
+
+					lineFrame.Visible = true
+				else
+					lineFrame.Visible = false
+				end
+			end)
+	end
+
+	if player.Character then
+		task.spawn(function()
+			InitCharacter(player.Character)
+		end)
+	end
+
+	characterConnection =
+		player.CharacterAdded:Connect(function(character)
+			task.wait(0.5)
+
+			if Db.States.EspCore then
+				InitCharacter(character)
+			end
+		end)
+
+	return characterConnection
 end
-if state then
-for _, p in ipairs(Players:GetPlayers()) do apply(p) end
-table.insert(Connections.Esp, Players.PlayerAdded:Connect(apply))
-else
-for _, c in ipairs(Connections.Esp) do c:Disconnect() end
-table.clear(Connections.Esp)
-for _, p in ipairs(Players:GetPlayers()) do
-if p.Character and p.Character:FindFirstChild("DexiESP") then p.Character.DexiESP:Destroy() end
-end
-end
+
+AddButton(
+	"Visuals",
+	"Advanced Name/Dist ESP",
+	"EspCore",
+	function(state)
+
+		if state then
+			Disconnect("EspJoin")
+
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					RenderVisuals(player)
+				end
+			end
+
+			Db.Connections.EspJoin =
+				Players.PlayerAdded:Connect(
+					function(player)
+						if Db.States.EspCore then
+							RenderVisuals(player)
+						end
+					end
+				)
+		else
+			Disconnect("EspJoin")
+
+			for playerName in pairs(Db.EspCache) do
+				RemoveESP(playerName)
+			end
+
+			for playerName in pairs(Db.BoxCache) do
+				RemoveESP(playerName)
+			end
+
+			for playerName in pairs(Db.LinesCache) do
+				RemoveESP(playerName)
+			end
+		end
+	end
+)
+
+AddButton(
+	"Visuals",
+	"2D Box ESP Frames",
+	"EspBox",
+	function()
+	end
+)
+
+AddButton(
+	"Visuals",
+	"Tracer Lines",
+	"EspLines",
+	function()
+	end
+)
+
+AddButton(
+	"Visuals",
+	"Chams Highlight",
+	"Chams",
+	function(state)
+
+		if state then
+			Disconnect("Chams")
+
+			Db.Connections.Chams =
+				RunService.Heartbeat:Connect(function()
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							if not player.Character:FindFirstChild(
+								"DexiOverloadChams"
+							) then
+
+								local highlight =
+									Instance.new("Highlight")
+
+								highlight.Name =
+									"DexiOverloadChams"
+
+								highlight.FillColor =
+									Color3.fromRGB(
+										140,
+										40,
+										255
+									)
+
+								highlight.OutlineColor =
+									Color3.fromRGB(
+										255,
+										255,
+										255
+									)
+
+								highlight.FillTransparency = 0.5
+								highlight.Parent = player.Character
+							end
+						end
+					end
+				end)
+		else
+			Disconnect("Chams")
+
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player.Character then
+					local highlight =
+						player.Character:FindFirstChild(
+							"DexiOverloadChams"
+						)
+
+					if highlight then
+						highlight:Destroy()
+					end
+				end
+			end
+		end
+	end
+)
+
+--==================================================================================--
+-- EXPLOITS
+--==================================================================================--
+
+AddButton(
+	"Exploits",
+	"Anti-Aim Rotation",
+	"AntiAim",
+	function(state)
+
+		if state then
+			Disconnect("AntiAim")
+
+			Db.Connections.AntiAim =
+				RunService.Heartbeat:Connect(function()
+
+					local root = GetRoot()
+
+					if root then
+						root.CFrame =
+							root.CFrame
+							* CFrame.Angles(
+								0,
+								math.rad(
+									math.random(
+										1,
+										360
+									)
+								),
+								0
+							)
+					end
+				end)
+		else
+			Disconnect("AntiAim")
+		end
+	end
+)
+
+AddButton(
+	"Exploits",
+	"High-Speed SpinBot",
+	"Spin",
+	function(state)
+
+		local root = GetRoot()
+
+		if state and root then
+			local old =
+				root:FindFirstChild(
+					"DexiOverloadSpin"
+				)
+
+			if old then
+				old:Destroy()
+			end
+
+			local angular =
+				Instance.new("BodyAngularVelocity")
+
+			angular.Name =
+				"DexiOverloadSpin"
+
+			angular.MaxTorque =
+				Vector3.new(
+					0,
+					math.huge,
+					0
+				)
+
+			angular.AngularVelocity =
+				Vector3.new(
+					0,
+					150,
+					0
+				)
+
+			angular.Parent = root
+		else
+			if root then
+				local angular =
+					root:FindFirstChild(
+						"DexiOverloadSpin"
+					)
+
+				if angular then
+					angular:Destroy()
+				end
+			end
+		end
+	end
+)
+
+AddButton(
+	"Exploits",
+	"Fake Lag Simulator",
+	"FakeLagActive",
+	function(state)
+
+		if state then
+			Disconnect("FakeLag")
+
+			local timer = 0
+
+			Db.Connections.FakeLag =
+				RunService.Heartbeat:Connect(function(deltaTime)
+
+					timer += deltaTime
+
+					local delaySeconds =
+						Db.SliderValues.FakeLag / 1000
+
+					if timer >= delaySeconds then
+						timer = 0
+
+						local root = GetRoot()
+
+						if root then
+							root.Anchored = not root.Anchored
+						end
+					end
+				end)
+		else
+			Disconnect("FakeLag")
+
+			local root = GetRoot()
+
+			if root then
+				root.Anchored = false
+			end
+		end
+	end
+)
+
+AddSlider(
+	"Exploits",
+	"Задержка Fake Lag (мс)",
+	0,
+	500,
+	0,
+	"FakeLag",
+	function()
+	end
+)
+
+--==================================================================================--
+-- WORLD & MISC
+--==================================================================================--
+
+local OriginalLighting = {
+	Ambient = Lighting.Ambient,
+	Brightness = Lighting.Brightness,
+	OutdoorAmbient = Lighting.OutdoorAmbient
+}
+
+AddButton(
+	"World & Misc",
+	"FullBright Ambient",
+	"FB",
+	function(state)
+
+		if state then
+			Lighting.Ambient =
+				Color3.fromRGB(
+					255,
+					255,
+					255
+				)
+
+			Lighting.Brightness = 2.5
+
+			Lighting.OutdoorAmbient =
+				Color3.fromRGB(
+					255,
+					255,
+					255
+				)
+		else
+			Lighting.Ambient =
+				OriginalLighting.Ambient
+
+			Lighting.Brightness =
+				OriginalLighting.Brightness
+
+			Lighting.OutdoorAmbient =
+				OriginalLighting.OutdoorAmbient
+		end
+	end
+)
+
+AddSlider(
+	"World & Misc",
+	"Контроль времени суток",
+	0,
+	23,
+	14,
+	"Time",
+	function(value)
+		Lighting.ClockTime = value
+	end
+)
+
+AddButton(
+	"World & Misc",
+	"Map X-Ray Textures",
+	"Xray",
+	function(state)
+
+		for _, object in ipairs(workspace:GetDescendants()) do
+
+			if object:IsA("BasePart")
+				and not object:IsDescendantOf(
+					LocalPlayer.Character
+						or workspace
+				)
+				and not object.Parent:FindFirstChildOfClass(
+					"Humanoid"
+				) then
+
+				if state then
+					if object:GetAttribute("DexiOldTransparency")
+						== nil then
+
+						object:SetAttribute(
+							"DexiOldTransparency",
+							object.Transparency
+						)
+					end
+
+					object.Transparency = 0.65
+				else
+					local old =
+						object:GetAttribute(
+							"DexiOldTransparency"
+						)
+
+					if old ~= nil then
+						object.Transparency = old
+
+						object:SetAttribute(
+							"DexiOldTransparency",
+							nil
+						)
+					end
+				end
+			end
+		end
+	end
+)
+
+AddButton(
+	"World & Misc",
+	"AutoClicker (Зажмите T)",
+	"Clicker",
+	function(state)
+
+		if state then
+			Disconnect("Clicker")
+
+			Db.Connections.Clicker =
+				RunService.RenderStepped:Connect(function()
+
+					if UserInputService:IsKeyDown(
+						Enum.KeyCode.T
+					) then
+
+						local character =
+							LocalPlayer.Character
+
+						local tool =
+							character
+							and character:FindFirstChildOfClass(
+								"Tool"
+							)
+
+						if tool then
+							tool:Activate()
+						end
+					end
+				end)
+		else
+			Disconnect("Clicker")
+		end
+	end
+)
+
+AddButton(
+	"World & Misc",
+	"Anti-AFK Core",
+	"AntiAfk",
+	function(state)
+
+		if state then
+			Disconnect("Afk")
+
+			Db.Connections.Afk =
+				LocalPlayer.Idled:Connect(function()
+
+					VirtualUser:CaptureController()
+
+					VirtualUser:ClickButton2(
+						Vector2.new(0, 0)
+					)
+				end)
+		else
+			Disconnect("Afk")
+		end
+	end
+)
+
+--==================================================================================--
+-- WINDOW DRAGGING
+--==================================================================================--
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPosition = nil
+
+Header.InputBegan:Connect(function(input)
+
+	if input.UserInputType
+		== Enum.UserInputType.MouseButton1 then
+
+		dragging = true
+		dragStart = input.Position
+		startPosition = MainFrame.Position
+
+		input.Changed:Connect(function()
+
+			if input.UserInputState
+				== Enum.UserInputState.End then
+
+				dragging = false
+			end
+		end)
+	end
 end)
 
-AddButton("Visuals", "FullBright (Ночное зрение)", "FullBright", function(state)
-if state then Lighting.Ambient = Color3.fromRGB(255, 255, 255) Lighting.Brightness = 2 else Lighting.Ambient = Color3.fromRGB(128, 128, 128) Lighting.Brightness = 1 end
+Header.InputChanged:Connect(function(input)
+
+	if input.UserInputType
+		== Enum.UserInputType.MouseMovement then
+
+		dragInput = input
+	end
 end)
 
-AddButton("Visuals", "Map X-Ray (Прозрачная карта)", "Xray", function(state)
-for _, p in ipairs(workspace:GetDescendants()) do
-if p:IsA("BasePart") and not (LocalPlayer.Character and p:IsDescendantOf(LocalPlayer.Character)) and not (p.Parent and p.Parent:FindFirstChildOfClass("Humanoid")) then
-if state then
-if not p:GetAttribute("OldTr") then p:SetAttribute("OldTr", p.Transparency) end
-p.Transparency = 0.6
-else
-local o = p:GetAttribute("OldTr") if o then p.Transparency = o p:SetAttribute("OldTr", nil) end
-end
-end
-end
+UserInputService.InputChanged:Connect(function(input)
+
+	if input == dragInput and dragging then
+
+		local delta =
+			input.Position - dragStart
+
+		MainFrame.Position =
+			UDim2.new(
+				startPosition.X.Scale,
+				startPosition.X.Offset + delta.X,
+				startPosition.Y.Scale,
+				startPosition.Y.Offset + delta.Y
+			)
+	end
 end)
 
--- MISC
-AddButton("Misc", "Ctrl+Click Teleport (Телепортация)", "ClickTP", function(state)
-if state then
-local m = LocalPlayer:GetMouse()
-Connections.ClickTp = m.Button1Down:Connect(function()
-if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and m.Target and GetRoot() then
-GetRoot().CFrame = CFrame.new(m.Hit.Position + Vector3.new(0, 3, 0))
-end
-end)
-else
-if Connections.ClickTp then Connections.ClickTp:Disconnect() Connections.ClickTp = nil end
-end
-end)
+--==================================================================================--
+-- V = TOGGLE MENU
+--==================================================================================--
 
-AddButton("Misc", "AutoClicker (Зажмите клавишу T)", "Clicker", function(state)
-if state then
-Connections.AutoClick = RunService.RenderStepped:Connect(function()
-if UserInputService:IsKeyDown(Enum.KeyCode.T) then
-local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-if tool then tool:Activate() end
-end
-end)
-else
-if Connections.AutoClick then Connections.AutoClick:Disconnect() Connections.AutoClick = nil end
-end
-end)
+Db.Connections.MenuToggle =
+	UserInputService.InputBegan:Connect(
+		function(input, processed)
 
-AddButton("Misc", "Spin Bot (Вращение)", "Spin", function(state)
-local hrp = GetRoot()
-if state and hrp then
-local bg = Instance.new("BodyAngularVelocity")
-bg.Name = "DexiSpin"
-bg.MaxTorque = Vector3.new(0, math.huge, 0)
-bg.AngularVelocity = Vector3.new(0, 60, 0)
-bg.Parent = hrp
-else
-if hrp and hrp:FindFirstChild("DexiSpin") then hrp.DexiSpin:Destroy() end
-end
-end)
+			if processed then
+				return
+			end
 
+			if input.KeyCode == Enum.KeyCode.V
+				and MainFrame.Parent then
 
+				MainFrame.Visible =
+					not MainFrame.Visible
+			end
+		end
+	)
 
-local drag, dragInput, start, startPos
-Header.InputBegan:Connect(function(i)
-if i.UserInputType == Enum.UserInputType.MouseButton1 then
-drag = true start = i.Position startPos = MainFrame.Position
-i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then drag = false end end)
-end
-end)
-Header.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement then dragInput = i end end)
-UserInputService.InputChanged:Connect(function(i)
-if i == dragInput and drag then
-local d = i.Position - start
-MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-end
-end)
+--==================================================================================--
+-- CHARACTER RESPAWN HANDLER
+--==================================================================================--
 
-UserInputService.InputBegan:Connect(function(i, proc)
-if not proc and i.KeyCode == Enum.KeyCode.V and MainFrame then MainFrame.Visible = not MainFrame.Visible end
-end)
+Db.Connections.CharacterAdded =
+	LocalPlayer.CharacterAdded:Connect(function(character)
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-task.wait(0.6)
-local hum = char:WaitForChild("Humanoid", 5)
-if hum then
-hum.WalkSpeed = SliderValues.CurrentSpeed
-if SliderValues.CurrentJump > 50 then hum.UseJumpPower = true hum.JumpPower = SliderValues.CurrentJump end
-end
-end)
+		task.wait(0.7)
+
+		local humanoid =
+			character:WaitForChild(
+				"Humanoid",
+				5
+			)
+
+		if not humanoid then
+			return
+		end
+
+		humanoid.WalkSpeed =
+			Db.SliderValues.Speed
+
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower =
+			Db.SliderValues.Jump
+
+		if Db.States.Anchor then
+			local root =
+				character:FindFirstChild(
+					"HumanoidRootPart"
+				)
+
+			if root then
+				root.Anchored = true
+			end
+		end
+	end)
+
+--==================================================================================--
+-- INITIALIZATION
+--==================================================================================--
+
+Notify(
+	"Dexi Script инициализирован! Нажмите [V]"
+)
