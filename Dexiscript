@@ -1,6 +1,6 @@
 --==================================================================================--
---                                   DEXI SCRIPT                                    --
---                     CLEANED / ROBLOX STUDIO LUAU VERSION                        --
+--                                   DEXI HUB                                       --
+--                              FIXED LUau VERSION                                  --
 --==================================================================================--
 
 local Players = game:GetService("Players")
@@ -11,23 +11,23 @@ local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
 local Camera = workspace.CurrentCamera
-
---==================================================================================--
--- DATABASE
---==================================================================================--
+local CurrentPlaceId = game.PlaceId
 
 local Db = {
 	SliderValues = {
 		Speed = 16,
 		Jump = 50,
 		AimFov = 150,
-		FlySpeed = 60,
+		FlySpeed = 75,
 		Time = 14,
 		HitboxSize = 2,
-		FakeLag = 0
+		SpamDelay = 2,
+		FakeLag = 0,
+		KillAuraDist = 25,
+		JjkDashPower = 90,
+		EspDistance = 500,
+		FlingPower = 50000
 	},
 
 	States = {},
@@ -41,33 +41,27 @@ local Db = {
 
 local BindingKey = nil
 local BindingButton = nil
+local Destroyed = false
 
---==================================================================================--
+--------------------------------------------------------------------------------------
 -- CHARACTER UTILITIES
---==================================================================================--
+--------------------------------------------------------------------------------------
 
 local function GetChar()
 	return LocalPlayer.Character
-		or LocalPlayer.CharacterAdded:Wait()
 end
 
 local function GetHum()
 	local char = GetChar()
-	return char:FindFirstChildOfClass("Humanoid")
-		or char:WaitForChild("Humanoid", 5)
+	return char and char:FindFirstChildOfClass("Humanoid")
 end
 
 local function GetRoot()
 	local char = GetChar()
-	return char:FindFirstChild("HumanoidRootPart")
-		or char:WaitForChild("HumanoidRootPart", 5)
+	return char and char:FindFirstChild("HumanoidRootPart")
 end
 
---==================================================================================--
--- CLEANUP HELPERS
---==================================================================================--
-
-local function Disconnect(name)
+local function DisconnectConnection(name)
 	local connection = Db.Connections[name]
 
 	if connection then
@@ -76,25 +70,17 @@ local function Disconnect(name)
 	end
 end
 
-local function DestroyInstance(instance)
-	if instance and instance.Parent then
-		instance:Destroy()
-	end
-end
+--------------------------------------------------------------------------------------
+-- OVERLAY
+--------------------------------------------------------------------------------------
 
---==================================================================================--
--- OVERLAY GUI
---==================================================================================--
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local OverlayGui = Instance.new("ScreenGui")
-OverlayGui.Name = "Dexi_Engine_Overlays"
+OverlayGui.Name = "Dexi_Hub_Overlays"
 OverlayGui.ResetOnSpawn = false
 OverlayGui.IgnoreGuiInset = true
 OverlayGui.Parent = PlayerGui
-
---==================================================================================--
--- AIM FOV CIRCLE
---==================================================================================--
 
 local AimCircleFrame = Instance.new("Frame")
 AimCircleFrame.Name = "AimCircle"
@@ -106,46 +92,37 @@ AimCircleFrame.Visible = false
 local AimCircleStroke = Instance.new("UIStroke")
 AimCircleStroke.Parent = AimCircleFrame
 AimCircleStroke.Thickness = 1.5
-AimCircleStroke.Color = Color3.fromRGB(150, 50, 255)
+AimCircleStroke.Color = Color3.fromRGB(140, 40, 255)
 
 local AimCircleCorner = Instance.new("UICorner")
 AimCircleCorner.Parent = AimCircleFrame
 AimCircleCorner.CornerRadius = UDim.new(1, 0)
 
---==================================================================================--
--- TARGET SEARCH
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- TARGET FINDER
+--------------------------------------------------------------------------------------
 
 local function GetClosestTarget()
 	local closest = nil
 	local shortest = Db.SliderValues.AimFov
-
 	local mousePos = UserInputService:GetMouseLocation()
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
 			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local root = character and character:FindFirstChild("HumanoidRootPart")
 
-			if character then
-				local humanoid = character:FindFirstChildOfClass("Humanoid")
-				local root = character:FindFirstChild("HumanoidRootPart")
-				local head = character:FindFirstChild("Head")
+			if humanoid and root and humanoid.Health > 0 then
+				local position, onScreen = Camera:WorldToViewportPoint(root.Position)
 
-				if humanoid and root and head and humanoid.Health > 0 then
-					local position, onScreen =
-						Camera:WorldToViewportPoint(root.Position)
+				if onScreen then
+					local screenPosition = Vector2.new(position.X, position.Y)
+					local distance = (screenPosition - mousePos).Magnitude
 
-					if onScreen then
-						local screenPosition =
-							Vector2.new(position.X, position.Y)
-
-						local distance =
-							(screenPosition - mousePos).Magnitude
-
-						if distance < shortest then
-							shortest = distance
-							closest = player
-						end
+					if distance < shortest then
+						shortest = distance
+						closest = player
 					end
 				end
 			end
@@ -155,18 +132,17 @@ local function GetClosestTarget()
 	return closest
 end
 
---==================================================================================--
+--------------------------------------------------------------------------------------
 -- NOTIFICATIONS
---==================================================================================--
+--------------------------------------------------------------------------------------
 
 local NotifGui = Instance.new("ScreenGui")
-NotifGui.Name = "Dexi_Notifications"
+NotifGui.Name = "Dexi_Hub_Notifications"
 NotifGui.ResetOnSpawn = false
 NotifGui.IgnoreGuiInset = true
 NotifGui.Parent = PlayerGui
 
 local NotifContainer = Instance.new("Frame")
-NotifContainer.Name = "Container"
 NotifContainer.Parent = NotifGui
 NotifContainer.Size = UDim2.new(0, 300, 0, 500)
 NotifContainer.Position = UDim2.new(1, -310, 1, -510)
@@ -179,13 +155,14 @@ NotifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 NotifLayout.Padding = UDim.new(0, 6)
 
 local function Notify(message)
+	if Destroyed then
+		return
+	end
+
 	local Card = Instance.new("Frame")
-	Card.Name = "Notification"
-	Card.Size = UDim2.new(0, 0, 0, 38)
-	Card.BackgroundColor3 = Color3.fromRGB(14, 10, 20)
-	Card.BackgroundTransparency = 0.1
-	Card.BorderSizePixel = 0
 	Card.Parent = NotifContainer
+	Card.Size = UDim2.new(0, 0, 0, 38)
+	Card.BackgroundColor3 = Color3.fromRGB(12, 8, 16)
 
 	local CardCorner = Instance.new("UICorner")
 	CardCorner.Parent = Card
@@ -209,63 +186,50 @@ local function Notify(message)
 	Text.TextXAlignment = Enum.TextXAlignment.Left
 	Text.Visible = false
 
-	local openTween = TweenService:Create(
+	TweenService:Create(
 		Card,
-		TweenInfo.new(
-			0.25,
-			Enum.EasingStyle.Quad,
-			Enum.EasingDirection.Out
-		),
-		{
-			Size = UDim2.new(0, 280, 0, 38)
-		}
-	)
+		TweenInfo.new(0.25),
+		{Size = UDim2.new(0, 280, 0, 38)}
+	):Play()
 
-	openTween:Play()
+	task.wait(0.05)
 
-	openTween.Completed:Connect(function()
-		if Card.Parent then
-			Text.Visible = true
-			CardStroke.Enabled = true
-		end
-	end)
+	if not Card.Parent then
+		return
+	end
 
-	task.delay(3, function()
-		if not Card.Parent then
-			return
-		end
+	Text.Visible = true
+	CardStroke.Enabled = true
 
-		Text.Visible = false
-		CardStroke.Enabled = false
+	task.spawn(function()
+		task.wait(3.5)
 
-		local closeTween = TweenService:Create(
-			Card,
-			TweenInfo.new(
-				0.2,
-				Enum.EasingStyle.Quad,
-				Enum.EasingDirection.In
-			),
-			{
-				Size = UDim2.new(0, 0, 0, 0)
-			}
-		)
+		if Card and Card.Parent then
+			Text.Visible = false
+			CardStroke.Enabled = false
 
-		closeTween:Play()
+			local closeTween = TweenService:Create(
+				Card,
+				TweenInfo.new(0.2),
+				{Size = UDim2.new(0, 0, 0, 0)}
+			)
 
-		closeTween.Completed:Wait()
+			closeTween:Play()
+			closeTween.Completed:Wait()
 
-		if Card.Parent then
-			Card:Destroy()
+			if Card then
+				Card:Destroy()
+			end
 		end
 	end)
 end
 
---==================================================================================--
--- MAIN GUI
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- MAIN UI
+--------------------------------------------------------------------------------------
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DexiScript_Overload"
+ScreenGui.Name = "DexiHub_Core"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = PlayerGui
@@ -273,32 +237,26 @@ ScreenGui.Parent = PlayerGui
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.new(0, 660, 0, 420)
-MainFrame.Position = UDim2.new(0.5, -330, 0.5, -210)
+MainFrame.Size = UDim2.new(0, 720, 0, 460)
+MainFrame.Position = UDim2.new(0.5, -360, 0.5, -230)
 MainFrame.BackgroundColor3 = Color3.fromRGB(10, 7, 14)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.Parent = MainFrame
-MainCorner.CornerRadius = UDim.new(0, 10)
+local FrameCorner = Instance.new("UICorner")
+FrameCorner.Parent = MainFrame
+FrameCorner.CornerRadius = UDim.new(0, 10)
 
 local Glow = Instance.new("UIStroke")
 Glow.Parent = MainFrame
 Glow.Thickness = 2
 Glow.Color = Color3.fromRGB(140, 40, 255)
 
---==================================================================================--
--- HEADER
---==================================================================================--
-
 local Header = Instance.new("Frame")
-Header.Name = "Header"
 Header.Parent = MainFrame
 Header.Size = UDim2.new(1, 0, 0, 45)
 Header.BackgroundColor3 = Color3.fromRGB(18, 13, 26)
 Header.BorderSizePixel = 0
-Header.Active = true
 
 local HeaderCorner = Instance.new("UICorner")
 HeaderCorner.Parent = Header
@@ -306,7 +264,7 @@ HeaderCorner.CornerRadius = UDim.new(0, 10)
 
 local Title = Instance.new("TextLabel")
 Title.Parent = Header
-Title.Size = UDim2.new(0, 300, 1, 0)
+Title.Size = UDim2.new(0, 500, 1, 0)
 Title.Position = UDim2.new(0, 15, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "Dexi Script"
@@ -321,6 +279,17 @@ Controls.Size = UDim2.new(0, 80, 1, 0)
 Controls.Position = UDim2.new(1, -90, 0, 0)
 Controls.BackgroundTransparency = 1
 
+local Content = Instance.new("Frame")
+Content.Parent = MainFrame
+Content.Size = UDim2.new(1, 0, 1, -45)
+Content.Position = UDim2.new(0, 0, 0, 45)
+Content.BackgroundTransparency = 1
+Content.ClipsDescendants = true
+
+--------------------------------------------------------------------------------------
+-- TOP BUTTONS
+--------------------------------------------------------------------------------------
+
 local function TopButton(text, x, color, callback)
 	local button = Instance.new("TextButton")
 	button.Parent = Controls
@@ -331,7 +300,6 @@ local function TopButton(text, x, color, callback)
 	button.TextColor3 = color
 	button.Font = Enum.Font.GothamBold
 	button.TextSize = 13
-	button.AutoButtonColor = false
 
 	local corner = Instance.new("UICorner")
 	corner.Parent = button
@@ -344,87 +312,75 @@ end
 
 local Minimized = false
 
-TopButton(
-	"—",
-	0,
-	Color3.fromRGB(200, 150, 255),
-	function()
-		Minimized = not Minimized
+TopButton("—", 0, Color3.fromRGB(200, 150, 255), function()
+	Minimized = not Minimized
 
-		local targetSize
+	TweenService:Create(
+		MainFrame,
+		TweenInfo.new(0.3),
+		{
+			Size = Minimized
+				and UDim2.new(0, 720, 0, 45)
+				or UDim2.new(0, 720, 0, 460)
+		}
+	):Play()
+end)
 
-		if Minimized then
-			targetSize = UDim2.new(0, 660, 0, 45)
-		else
-			targetSize = UDim2.new(0, 660, 0, 420)
-		end
-
-		TweenService:Create(
-			MainFrame,
-			TweenInfo.new(0.3),
-			{
-				Size = targetSize
-			}
-		):Play()
-
-		Notify(
-			Minimized
-				and "Панель свернута"
-				or "Панель развернута"
-		)
+local function Cleanup()
+	if Destroyed then
+		return
 	end
-)
 
-TopButton(
-	"X",
-	40,
-	Color3.fromRGB(255, 75, 105),
-	function()
-		for _, connection in pairs(Db.Connections) do
-			if connection then
-				connection:Disconnect()
-			end
+	Destroyed = true
+
+	for name, connection in pairs(Db.Connections) do
+		if connection then
+			connection:Disconnect()
 		end
 
-		for _, object in pairs(Db.EspCache) do
-			DestroyInstance(object)
-		end
-
-		for _, object in pairs(Db.BoxCache) do
-			DestroyInstance(object)
-		end
-
-		for _, object in pairs(Db.LinesCache) do
-			DestroyInstance(object)
-		end
-
-		Db.Connections = {}
-		Db.EspCache = {}
-		Db.BoxCache = {}
-		Db.LinesCache = {}
-
-		DestroyInstance(NotifGui)
-		DestroyInstance(OverlayGui)
-		DestroyInstance(ScreenGui)
+		Db.Connections[name] = nil
 	end
-)
 
---==================================================================================--
--- CONTENT
---==================================================================================--
+	for _, object in pairs(Db.EspCache) do
+		if object then
+			object:Destroy()
+		end
+	end
 
-local Content = Instance.new("Frame")
-Content.Name = "Content"
-Content.Parent = MainFrame
-Content.Size = UDim2.new(1, 0, 1, -45)
-Content.Position = UDim2.new(0, 0, 0, 45)
-Content.BackgroundTransparency = 1
-Content.ClipsDescendants = true
+	for _, object in pairs(Db.BoxCache) do
+		if object then
+			object:Destroy()
+		end
+	end
+
+	for _, object in pairs(Db.LinesCache) do
+		if object then
+			object:Destroy()
+		end
+	end
+
+	if NotifGui then
+		NotifGui:Destroy()
+	end
+
+	if OverlayGui then
+		OverlayGui:Destroy()
+	end
+
+	if ScreenGui then
+		ScreenGui:Destroy()
+	end
+end
+
+TopButton("X", 40, Color3.fromRGB(255, 75, 105), Cleanup)
+
+--------------------------------------------------------------------------------------
+-- SIDEBAR
+--------------------------------------------------------------------------------------
 
 local Sidebar = Instance.new("Frame")
-Sidebar.Name = "Sidebar"
 Sidebar.Parent = Content
-Sidebar.Size = UDim2.new(0, 140, 1, 0)
+Sidebar.Size = UDim2.new(0, 155, 1, 0)
 Sidebar.BackgroundColor3 = Color3.fromRGB(15, 11, 22)
 Sidebar.BorderSizePixel = 0
 
@@ -439,45 +395,45 @@ TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 TabList.SortOrder = Enum.SortOrder.LayoutOrder
 
 local TabContainer = Instance.new("Frame")
-TabContainer.Name = "TabContainer"
 TabContainer.Parent = Content
-TabContainer.Size = UDim2.new(1, -165, 1, -20)
-TabContainer.Position = UDim2.new(0, 155, 0, 10)
+TabContainer.Size = UDim2.new(1, -180, 1, -20)
+TabContainer.Position = UDim2.new(0, 170, 0, 10)
 TabContainer.BackgroundTransparency = 1
 
---==================================================================================--
+--------------------------------------------------------------------------------------
 -- TAB SYSTEM
---==================================================================================--
+--------------------------------------------------------------------------------------
 
 local InitialTab = true
 
 local function RegisterTab(name, order)
+	if Db.Tabs[name] then
+		return Db.Tabs[name]
+	end
+
 	local button = Instance.new("TextButton")
-	button.Name = name .. "Button"
 	button.Parent = Sidebar
-	button.Size = UDim2.new(0, 125, 0, 32)
+	button.Size = UDim2.new(0, 140, 0, 32)
 	button.BackgroundColor3 = Color3.fromRGB(24, 18, 34)
 	button.Text = name
 	button.TextColor3 = Color3.fromRGB(150, 140, 170)
 	button.Font = Enum.Font.GothamMedium
 	button.TextSize = 12
 	button.LayoutOrder = order
-	button.AutoButtonColor = false
 
 	local buttonCorner = Instance.new("UICorner")
 	buttonCorner.Parent = button
 	buttonCorner.CornerRadius = UDim.new(0, 6)
 
 	local scroll = Instance.new("ScrollingFrame")
-	scroll.Name = name .. "Page"
 	scroll.Parent = TabContainer
 	scroll.Size = UDim2.new(1, 0, 1, 0)
 	scroll.BackgroundTransparency = 1
 	scroll.BorderSizePixel = 0
 	scroll.ScrollBarThickness = 3
 	scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 40, 255)
-	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 	scroll.Visible = InitialTab
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 	local layout = Instance.new("UIListLayout")
 	layout.Parent = scroll
@@ -502,14 +458,14 @@ local function RegisterTab(name, order)
 	Db.Tabs[name] = scroll
 
 	button.MouseButton1Click:Connect(function()
-		for _, page in pairs(Db.Tabs) do
-			page.Visible = false
+		for _, frame in pairs(Db.Tabs) do
+			frame.Visible = false
 		end
 
-		for _, child in ipairs(Sidebar:GetChildren()) do
-			if child:IsA("TextButton") then
-				child.BackgroundColor3 = Color3.fromRGB(24, 18, 34)
-				child.TextColor3 = Color3.fromRGB(150, 140, 170)
+		for _, sideButton in ipairs(Sidebar:GetChildren()) do
+			if sideButton:IsA("TextButton") then
+				sideButton.BackgroundColor3 = Color3.fromRGB(24, 18, 34)
+				sideButton.TextColor3 = Color3.fromRGB(150, 140, 170)
 			end
 		end
 
@@ -517,38 +473,37 @@ local function RegisterTab(name, order)
 		button.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
 		button.TextColor3 = Color3.fromRGB(255, 255, 255)
 	end)
+
+	return scroll
 end
 
---==================================================================================--
--- BUTTON
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- BUTTON BUILDER
+--------------------------------------------------------------------------------------
 
 local function AddButton(tab, text, key, callback)
 	local parent = Db.Tabs[tab]
 
 	if not parent then
-		warn("Dexi: tab not found:", tab)
+		warn("Dexi Hub: tab not found:", tab)
 		return
 	end
 
 	Db.States[key] = false
 
 	local row = Instance.new("Frame")
-	row.Name = key .. "Row"
 	row.Parent = parent
 	row.Size = UDim2.new(1, -5, 0, 36)
 	row.BackgroundTransparency = 1
 
 	local button = Instance.new("TextButton")
-	button.Name = "Button"
 	button.Parent = row
 	button.Size = UDim2.new(1, -55, 1, 0)
 	button.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
 	button.Text = text
 	button.TextColor3 = Color3.fromRGB(180, 180, 180)
 	button.Font = Enum.Font.GothamMedium
-	button.TextSize = 12
-	button.AutoButtonColor = false
+	button.TextSize = 11
 
 	local corner = Instance.new("UICorner")
 	corner.Parent = button
@@ -559,7 +514,6 @@ local function AddButton(tab, text, key, callback)
 	stroke.Color = Color3.fromRGB(45, 35, 60)
 
 	local bindButton = Instance.new("TextButton")
-	bindButton.Name = "Bind"
 	bindButton.Parent = row
 	bindButton.Size = UDim2.new(0, 50, 1, 0)
 	bindButton.Position = UDim2.new(1, -50, 0, 0)
@@ -568,7 +522,6 @@ local function AddButton(tab, text, key, callback)
 	bindButton.TextColor3 = Color3.fromRGB(140, 120, 160)
 	bindButton.Font = Enum.Font.GothamBold
 	bindButton.TextSize = 10
-	bindButton.AutoButtonColor = false
 
 	local bindCorner = Instance.new("UICorner")
 	bindCorner.Parent = bindButton
@@ -581,19 +534,25 @@ local function AddButton(tab, text, key, callback)
 	local function TriggerAction()
 		Db.States[key] = not Db.States[key]
 
-		callback(Db.States[key])
+		local state = Db.States[key]
 
-		if Db.States[key] then
+		local success, err = pcall(function()
+			callback(state)
+		end)
+
+		if not success then
+			warn("Dexi Hub:", key, err)
+		end
+
+		if state then
 			button.TextColor3 = Color3.fromRGB(255, 255, 255)
 			button.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
 			stroke.Color = Color3.fromRGB(200, 100, 255)
-
 			Notify("Включено: " .. text)
 		else
 			button.TextColor3 = Color3.fromRGB(180, 180, 180)
 			button.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
 			stroke.Color = Color3.fromRGB(45, 35, 60)
-
 			Notify("Выключено: " .. text)
 		end
 	end
@@ -607,37 +566,35 @@ local function AddButton(tab, text, key, callback)
 	}
 
 	bindButton.MouseButton1Click:Connect(function()
-		bindButton.Text = "..."
 		BindingKey = key
 		BindingButton = bindButton
+		bindButton.Text = "..."
 	end)
 end
 
---==================================================================================--
--- SLIDER
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- SLIDER BUILDER
+--------------------------------------------------------------------------------------
 
-local function AddSlider(tab, name, minimum, maximum, default, key, callback)
+local function AddSlider(tab, name, minValue, maxValue, default, key, callback)
 	local parent = Db.Tabs[tab]
 
 	if not parent then
-		warn("Dexi: tab not found:", tab)
+		warn("Dexi Hub: tab not found:", tab)
 		return
 	end
 
-	local background = Instance.new("Frame")
-	background.Name = key .. "Slider"
-	background.Parent = parent
-	background.Size = UDim2.new(1, -5, 0, 44)
-	background.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
-	background.BorderSizePixel = 0
+	local bg = Instance.new("Frame")
+	bg.Parent = parent
+	bg.Size = UDim2.new(1, -5, 0, 44)
+	bg.BackgroundColor3 = Color3.fromRGB(25, 19, 35)
 
 	local corner = Instance.new("UICorner")
-	corner.Parent = background
+	corner.Parent = bg
 	corner.CornerRadius = UDim.new(0, 6)
 
 	local label = Instance.new("TextLabel")
-	label.Parent = background
+	label.Parent = bg
 	label.Size = UDim2.new(1, -16, 0, 18)
 	label.Position = UDim2.new(0, 8, 0, 2)
 	label.BackgroundTransparency = 1
@@ -648,38 +605,27 @@ local function AddSlider(tab, name, minimum, maximum, default, key, callback)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 
 	local track = Instance.new("Frame")
-	track.Name = "Track"
-	track.Parent = background
+	track.Parent = bg
 	track.Size = UDim2.new(1, -16, 0, 4)
 	track.Position = UDim2.new(0, 8, 0, 28)
 	track.BackgroundColor3 = Color3.fromRGB(45, 35, 55)
 	track.BorderSizePixel = 0
 
-	local trackCorner = Instance.new("UICorner")
-	trackCorner.Parent = track
-	trackCorner.CornerRadius = UDim.new(1, 0)
+	local fillPercent = 0
 
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Parent = track
-	fill.Size = UDim2.new(
-		math.clamp(
-			(default - minimum) / (maximum - minimum),
+	if maxValue ~= minValue then
+		fillPercent = math.clamp(
+			(default - minValue) / (maxValue - minValue),
 			0,
 			1
-		),
-		0,
-		1,
-		0
-	)
+		)
+	end
+
+	local fill = Instance.new("Frame")
+	fill.Parent = track
+	fill.Size = UDim2.new(fillPercent, 0, 1, 0)
 	fill.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
 	fill.BorderSizePixel = 0
-
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.Parent = fill
-	fillCorner.CornerRadius = UDim.new(1, 0)
-
-	Db.SliderValues[key] = default
 
 	local dragging = false
 
@@ -690,23 +636,22 @@ local function AddSlider(tab, name, minimum, maximum, default, key, callback)
 			return
 		end
 
-		local relativeX =
-			(input.Position.X - track.AbsolutePosition.X) / width
+		local relativeX = math.clamp(
+			(input.Position.X - track.AbsolutePosition.X) / width,
+			0,
+			1
+		)
 
-		local ratio = math.clamp(relativeX, 0, 1)
+		fill.Size = UDim2.new(relativeX, 0, 1, 0)
 
-		local value =
-			math.floor(
-				minimum + (maximum - minimum) * ratio
-			)
-
-		fill.Size = UDim2.new(ratio, 0, 1, 0)
-
-		label.Text = name .. ": " .. tostring(value)
+		local value = math.floor(
+			minValue + (maxValue - minValue) * relativeX + 0.5
+		)
 
 		Db.SliderValues[key] = value
+		label.Text = name .. ": " .. tostring(value)
 
-		callback(value)
+		pcall(callback, value)
 	end
 
 	track.InputBegan:Connect(function(input)
@@ -716,568 +661,41 @@ local function AddSlider(tab, name, minimum, maximum, default, key, callback)
 		end
 	end)
 
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging
-			and input.UserInputType == Enum.UserInputType.MouseMovement then
+	track.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+			Notify(name .. " -> " .. tostring(Db.SliderValues[key]))
+		end
+	end)
 
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			Update(input)
 		end
 	end)
 
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			if dragging then
-				dragging = false
-
-				Notify(
-					name
-						.. " -> "
-						.. tostring(Db.SliderValues[key])
-				)
-			end
-		end
-	end)
+	Db.SliderValues[key] = default
 end
 
---==================================================================================--
--- KEYBINDS
---==================================================================================--
-
-Db.Connections.Keybinds = UserInputService.InputBegan:Connect(
-	function(input, processed)
-		if processed then
-			return
-		end
-
-		if BindingKey and BindingButton then
-			local bindData = Db.Keybinds[BindingKey]
-
-			if not bindData then
-				BindingKey = nil
-				BindingButton = nil
-				return
-			end
-
-			if input.KeyCode == Enum.KeyCode.Backspace then
-				bindData.Key = nil
-				BindingButton.Text = "NONE"
-				Notify("Бинд сброшен")
-			elseif input.KeyCode ~= Enum.KeyCode.Unknown then
-				bindData.Key = input.KeyCode
-
-				local keyName = input.KeyCode.Name
-				BindingButton.Text = string.sub(keyName, 1, 5)
-
-				Notify("Назначена клавиша: " .. keyName)
-			end
-
-			BindingKey = nil
-			BindingButton = nil
-
-			return
-		end
-
-		for _, bindData in pairs(Db.Keybinds) do
-			if bindData.Key
-				and input.KeyCode == bindData.Key then
-
-				bindData.Action()
-			end
-		end
-	end
-)
-
---==================================================================================--
--- REGISTER TABS
---==================================================================================--
-
-RegisterTab("Combat", 1)
-RegisterTab("Movement", 2)
-RegisterTab("Visuals", 3)
-RegisterTab("Exploits", 4)
-RegisterTab("World & Misc", 5)
-
---==================================================================================--
--- COMBAT
---==================================================================================--
-
-AddButton(
-	"Combat",
-	"AimBot Head (Слежение головы)",
-	"Aimbot",
-	function(state)
-
-		if state then
-			Disconnect("Aimbot")
-
-			Db.Connections.Aimbot =
-				RunService.RenderStepped:Connect(function()
-
-					if not Camera then
-						Camera = workspace.CurrentCamera
-					end
-
-					local mousePos =
-						UserInputService:GetMouseLocation()
-
-					AimCircleFrame.Position =
-						UDim2.new(
-							0,
-							mousePos.X,
-							0,
-							mousePos.Y
-						)
-
-					AimCircleFrame.Size =
-						UDim2.new(
-							0,
-							Db.SliderValues.AimFov * 2,
-							0,
-							Db.SliderValues.AimFov * 2
-						)
-
-					AimCircleFrame.Visible = true
-
-					local target = GetClosestTarget()
-
-					if target
-						and target.Character then
-
-						local head =
-							target.Character:FindFirstChild("Head")
-
-						if head then
-							local targetCFrame =
-								CFrame.new(
-									Camera.CFrame.Position,
-									head.Position
-								)
-
-							Camera.CFrame =
-								Camera.CFrame:Lerp(
-									targetCFrame,
-									0.08
-								)
-						end
-					end
-				end)
-		else
-			Disconnect("Aimbot")
-			AimCircleFrame.Visible = false
-		end
-	end
-)
-
-AddSlider(
-	"Combat",
-	"Aim FOV",
-	30,
-	400,
-	150,
-	"AimFov",
-	function()
-	end
-)
-
-AddButton(
-	"Combat",
-	"TriggerBot (Авто-Клик)",
-	"Trigger",
-	function(state)
-
-		if state then
-			Disconnect("Trigger")
-
-			Db.Connections.Trigger =
-				RunService.RenderStepped:Connect(function()
-
-					local mouse =
-						LocalPlayer:GetMouse()
-
-					if mouse.Target then
-						local model =
-							mouse.Target:FindFirstAncestorOfClass("Model")
-
-						if model
-							and model:FindFirstChildOfClass("Humanoid") then
-
-							local character =
-								LocalPlayer.Character
-
-							local tool =
-								character
-								and character:FindFirstChildOfClass("Tool")
-
-							if tool then
-								tool:Activate()
-							end
-						end
-					end
-				end)
-		else
-			Disconnect("Trigger")
-		end
-	end
-)
-
-AddButton(
-	"Combat",
-	"Hitbox Expander",
-	"Hitbox",
-	function(state)
-
-		if state then
-			Disconnect("Hitbox")
-
-			Db.Connections.Hitbox =
-				RunService.Heartbeat:Connect(function()
-
-					for _, player in ipairs(Players:GetPlayers()) do
-						if player ~= LocalPlayer
-							and player.Character then
-
-							local head =
-								player.Character:FindFirstChild("Head")
-
-							if head then
-								local size =
-									Db.SliderValues.HitboxSize
-
-								head.Size =
-									Vector3.new(
-										size,
-										size,
-										size
-									)
-
-								head.CanCollide = false
-							end
-						end
-					end
-				end)
-		else
-			Disconnect("Hitbox")
-
-			for _, player in ipairs(Players:GetPlayers()) do
-				if player ~= LocalPlayer
-					and player.Character then
-
-					local head =
-						player.Character:FindFirstChild("Head")
-
-					if head then
-						head.Size =
-							Vector3.new(2, 1, 1)
-
-						head.CanCollide = false
-					end
-				end
-			end
-		end
-	end
-)
-
-AddSlider(
-	"Combat",
-	"Размер хитбокса головы",
-	2,
-	15,
-	2,
-	"HitboxSize",
-	function()
-	end
-)
-
---==================================================================================--
--- MOVEMENT
---==================================================================================--
-
-AddSlider(
-	"Movement",
-	"Скорость WalkSpeed",
-	16,
-	250,
-	16,
-	"Speed",
-	function(value)
-
-		local humanoid = GetHumanoid and GetHumanoid()
-
-		if not humanoid then
-			humanoid = GetHum()
-		end
-
-		if humanoid then
-			humanoid.WalkSpeed = value
-		end
-	end
-)
-
-AddSlider(
-	"Movement",
-	"Прыжок JumpPower",
-	50,
-	350,
-	50,
-	"Jump",
-	function(value)
-
-		local humanoid = GetHum()
-
-		if humanoid then
-			humanoid.UseJumpPower = true
-			humanoid.JumpPower = value
-		end
-	end
-)
-
-AddSlider(
-	"Movement",
-	"Скорость полета",
-	20,
-	300,
-	60,
-	"FlySpeed",
-	function()
-	end
-)
-
-AddButton(
-	"Movement",
-	"No-Clip Fly Hybrid",
-	"Fly",
-	function(state)
-
-		local root = GetRoot()
-		local humanoid = GetHum()
-
-		if state and root and humanoid then
-			Disconnect("Fly")
-
-			local oldVelocity =
-				root:FindFirstChild("DexiOverloadFly")
-
-			if oldVelocity then
-				oldVelocity:Destroy()
-			end
-
-			local velocity =
-				Instance.new("BodyVelocity")
-
-			velocity.Name = "DexiOverloadFly"
-			velocity.MaxForce =
-				Vector3.new(
-					math.huge,
-					math.huge,
-					math.huge
-				)
-
-			velocity.Velocity =
-				Vector3.zero
-
-			velocity.Parent = root
-
-			humanoid.PlatformStand = true
-
-			Db.Connections.Fly =
-				RunService.RenderStepped:Connect(function()
-
-					if not root.Parent then
-						Disconnect("Fly")
-						return
-					end
-
-					local direction = Vector3.zero
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-						direction += Camera.CFrame.LookVector
-					end
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-						direction -= Camera.CFrame.LookVector
-					end
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-						direction -= Camera.CFrame.RightVector
-					end
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-						direction += Camera.CFrame.RightVector
-					end
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-						direction += Vector3.new(0, 1, 0)
-					end
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-						direction -= Vector3.new(0, 1, 0)
-					end
-
-					if direction.Magnitude > 0 then
-						velocity.Velocity =
-							direction.Unit
-							* Db.SliderValues.FlySpeed
-					else
-						velocity.Velocity =
-							Vector3.zero
-					end
-
-					local character =
-						LocalPlayer.Character
-
-					if character then
-						for _, part in ipairs(character:GetDescendants()) do
-							if part:IsA("BasePart") then
-								part.CanCollide = false
-							end
-						end
-					end
-				end)
-		else
-			Disconnect("Fly")
-
-			if root then
-				local velocity =
-					root:FindFirstChild("DexiOverloadFly")
-
-				if velocity then
-					velocity:Destroy()
-				end
-			end
-
-			if humanoid then
-				humanoid.PlatformStand = false
-			end
-		end
-	end
-)
-
-AddButton(
-	"Movement",
-	"Toggle Noclip",
-	"Noclip",
-	function(state)
-
-		if state then
-			Disconnect("Noclip")
-
-			Db.Connections.Noclip =
-				RunService.Stepped:Connect(function()
-
-					local character =
-						LocalPlayer.Character
-
-					if character then
-						for _, part in ipairs(character:GetDescendants()) do
-							if part:IsA("BasePart") then
-								part.CanCollide = false
-							end
-						end
-					end
-				end)
-		else
-			Disconnect("Noclip")
-		end
-	end
-)
-
-AddButton(
-	"Movement",
-	"Velocity BHop",
-	"Bhop",
-	function(state)
-
-		if state then
-			Disconnect("Bhop")
-
-			Db.Connections.Bhop =
-				RunService.PreSimulation:Connect(function()
-
-					if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-						local humanoid = GetHum()
-
-						if humanoid
-							and humanoid.FloorMaterial
-								~= Enum.Material.Air then
-
-							humanoid:ChangeState(
-								Enum.HumanoidStateType.Jumping
-							)
-						end
-					end
-				end)
-		else
-			Disconnect("Bhop")
-		end
-	end
-)
-
-AddButton(
-	"Movement",
-	"Infinite Jump",
-	"InfJump",
-	function(state)
-
-		if state then
-			Disconnect("InfJump")
-
-			Db.Connections.InfJump =
-				UserInputService.InputBegan:Connect(
-					function(input, processed)
-
-						if processed then
-							return
-						end
-
-						if input.KeyCode
-							== Enum.KeyCode.Space then
-
-							local humanoid = GetHum()
-
-							if humanoid then
-								humanoid:ChangeState(
-									Enum.HumanoidStateType.Jumping
-								)
-							end
-						end
-					end
-				)
-		else
-			Disconnect("InfJump")
-		end
-	end
-)
-
-AddButton(
-	"Movement",
-	"Auto-Anchoring",
-	"Anchor",
-	function(state)
-
-		local root = GetRoot()
-
-		if root then
-			root.Anchored = state
-		end
-	end
-)
-
---==================================================================================--
--- VISUALS
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- ESP
+--------------------------------------------------------------------------------------
 
 local function RemoveESP(playerName)
-	local esp = Db.EspCache[playerName]
-	local box = Db.BoxCache[playerName]
-	local line = Db.LinesCache[playerName]
+	if Db.EspCache[playerName] then
+		Db.EspCache[playerName]:Destroy()
+		Db.EspCache[playerName] = nil
+	end
 
-	DestroyInstance(esp)
-	DestroyInstance(box)
-	DestroyInstance(line)
+	if Db.BoxCache[playerName] then
+		Db.BoxCache[playerName]:Destroy()
+		Db.BoxCache[playerName] = nil
+	end
 
-	Db.EspCache[playerName] = nil
-	Db.BoxCache[playerName] = nil
-	Db.LinesCache[playerName] = nil
+	if Db.LinesCache[playerName] then
+		Db.LinesCache[playerName]:Destroy()
+		Db.LinesCache[playerName] = nil
+	end
 end
 
 local function RenderVisuals(player)
@@ -1287,844 +705,1967 @@ local function RenderVisuals(player)
 
 	RemoveESP(player.Name)
 
-	local characterConnection
-
-	local function InitCharacter(character)
-		RemoveESP(player.Name)
-
-		local head =
-			character:WaitForChild("Head", 5)
-
-		local humanoid =
-			character:FindFirstChildOfClass("Humanoid")
-
-		if not head or not humanoid then
+	local function Init(character)
+		if not Db.States.EspCore then
 			return
 		end
 
-		local billboard =
-			Instance.new("BillboardGui")
+		local head = character:FindFirstChild("Head")
 
+		if not head then
+			head = character:WaitForChild("Head", 5)
+		end
+
+		if not head then
+			return
+		end
+
+		if not Db.States.EspCore then
+			return
+		end
+
+		local billboard = Instance.new("BillboardGui")
 		billboard.Name = "DexiOverEsp"
 		billboard.Adornee = head
-		billboard.Size =
-			UDim2.new(0, 150, 0, 50)
-
+		billboard.Size = UDim2.new(0, 150, 0, 50)
 		billboard.AlwaysOnTop = true
 		billboard.Parent = head
 
-		local label =
-			Instance.new("TextLabel")
-
+		local label = Instance.new("TextLabel")
 		label.Parent = billboard
-		label.Size =
-			UDim2.new(1, 0, 0, 20)
-
+		label.Size = UDim2.new(1, 0, 0, 20)
 		label.BackgroundTransparency = 1
-		label.TextColor3 =
-			Color3.fromRGB(155, 65, 255)
-
+		label.TextColor3 = Color3.fromRGB(155, 65, 255)
 		label.Font = Enum.Font.GothamBold
 		label.TextSize = 10
 
-		local healthBackground =
-			Instance.new("Frame")
-
+		local healthBackground = Instance.new("Frame")
 		healthBackground.Parent = billboard
-		healthBackground.Size =
-			UDim2.new(0, 80, 0, 4)
-
-		healthBackground.Position =
-			UDim2.new(0.5, -40, 0, 22)
-
-		healthBackground.BackgroundColor3 =
-			Color3.fromRGB(30, 15, 35)
-
+		healthBackground.Size = UDim2.new(0, 80, 0, 4)
+		healthBackground.Position = UDim2.new(0.5, -40, 0, 22)
+		healthBackground.BackgroundColor3 = Color3.fromRGB(30, 15, 35)
 		healthBackground.BorderSizePixel = 0
 
-		local healthFill =
-			Instance.new("Frame")
-
+		local healthFill = Instance.new("Frame")
 		healthFill.Parent = healthBackground
-		healthFill.Size =
-			UDim2.new(1, 0, 1, 0)
-
-		healthFill.BackgroundColor3 =
-			Color3.fromRGB(0, 255, 120)
-
+		healthFill.Size = UDim2.new(1, 0, 1, 0)
+		healthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
 		healthFill.BorderSizePixel = 0
 
-		local boxFrame =
-			Instance.new("Frame")
+		Db.EspCache[player.Name] = billboard
 
-		boxFrame.Name =
-			"DexiBox_" .. player.Name
-
+		local boxFrame = Instance.new("Frame")
+		boxFrame.Name = "DexiESPBox"
 		boxFrame.Parent = OverlayGui
 		boxFrame.BackgroundTransparency = 1
 		boxFrame.BorderSizePixel = 0
 		boxFrame.Visible = false
 
-		local boxStroke =
-			Instance.new("UIStroke")
-
+		local boxStroke = Instance.new("UIStroke")
 		boxStroke.Parent = boxFrame
-		boxStroke.Color =
-			Color3.fromRGB(140, 40, 255)
-
+		boxStroke.Color = Color3.fromRGB(140, 40, 255)
 		boxStroke.Thickness = 1
 
-		local lineFrame =
-			Instance.new("Frame")
+		Db.BoxCache[player.Name] = boxFrame
 
-		lineFrame.Name =
-			"DexiLine_" .. player.Name
-
+		local lineFrame = Instance.new("Frame")
+		lineFrame.Name = "DexiESPLine"
 		lineFrame.Parent = OverlayGui
-		lineFrame.BackgroundColor3 =
-			Color3.fromRGB(140, 40, 255)
-
+		lineFrame.BackgroundColor3 = Color3.fromRGB(140, 40, 255)
 		lineFrame.BorderSizePixel = 0
-		lineFrame.AnchorPoint =
-			Vector2.new(0.5, 0.5)
-
+		lineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 		lineFrame.Visible = false
 
-		Db.EspCache[player.Name] = billboard
-		Db.BoxCache[player.Name] = boxFrame
 		Db.LinesCache[player.Name] = lineFrame
 
-		local renderConnection
+		local connection
 
-		renderConnection =
-			RunService.RenderStepped:Connect(function()
+		connection = RunService.RenderStepped:Connect(function()
+			if Destroyed then
+				connection:Disconnect()
+				return
+			end
 
-				if not Db.States.EspCore then
-					renderConnection:Disconnect()
-					RemoveESP(player.Name)
-					return
-				end
+			if not Db.States.EspCore
+				or not character.Parent
+				or not character:FindFirstChildOfClass("Humanoid") then
 
-				if not character.Parent then
-					renderConnection:Disconnect()
-					RemoveESP(player.Name)
-					return
-				end
+				connection:Disconnect()
+				RemoveESP(player.Name)
+				return
+			end
 
-				local currentHumanoid =
-					character:FindFirstChildOfClass("Humanoid")
+			local root = character:FindFirstChild("HumanoidRootPart")
+			local localRoot = GetRoot()
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
 
-				local root =
-					character:FindFirstChild("HumanoidRootPart")
+			if not root or not localRoot then
+				return
+			end
 
-				local localRoot =
-					LocalPlayer.Character
-					and LocalPlayer.Character:FindFirstChild(
-						"HumanoidRootPart"
-					)
+			local distance = math.floor(
+				(root.Position - localRoot.Position).Magnitude
+			)
 
-				if not currentHumanoid
-					or not root
-					or not localRoot then
+			if distance > Db.SliderValues.EspDistance then
+				billboard.Enabled = false
+				boxFrame.Visible = false
+				lineFrame.Visible = false
+				return
+			end
 
-					boxFrame.Visible = false
-					lineFrame.Visible = false
-					return
-				end
+			billboard.Enabled = true
 
-				local position, onScreen =
-					Camera:WorldToViewportPoint(
-						root.Position
-					)
+			label.Text = string.format(
+				"%s (%dm)",
+				player.Name,
+				distance
+			)
 
-				local distance =
-					math.floor(
-						(root.Position - localRoot.Position)
-							.Magnitude
-					)
+			local healthPercent = 0
 
-				label.Text =
-					string.format(
-						"%s (%dm)",
-						player.Name,
-						distance
-					)
+			if humanoid.MaxHealth > 0 then
+				healthPercent = math.clamp(
+					humanoid.Health / humanoid.MaxHealth,
+					0,
+					1
+				)
+			end
 
-				local health =
-					math.clamp(
-						currentHumanoid.Health
-							/ math.max(
-								currentHumanoid.MaxHealth,
-								1
-							),
-						0,
-						1
-					)
+			healthFill.Size = UDim2.new(
+				healthPercent,
+				0,
+				1,
+				0
+			)
 
-				healthFill.Size =
-					UDim2.new(
-						health,
-						0,
-						1,
-						0
-					)
+			local rootPosition, onScreen = Camera:WorldToViewportPoint(
+				root.Position
+			)
 
-				if onScreen
-					and position.Z > 0
-					and Db.States.EspBox then
+			if onScreen and rootPosition.Z > 0 and Db.States.EspBox then
+				local sizeX = math.clamp(2000 / rootPosition.Z, 20, 500)
+				local sizeY = math.clamp(3500 / rootPosition.Z, 30, 700)
 
-					local sizeX =
-						math.clamp(
-							2000 / position.Z,
-							20,
-							500
-						)
+				boxFrame.Size = UDim2.new(0, sizeX, 0, sizeY)
+				boxFrame.Position = UDim2.new(
+					0,
+					rootPosition.X - sizeX / 2,
+					0,
+					rootPosition.Y - sizeY / 2
+				)
 
-					local sizeY =
-						math.clamp(
-							3500 / position.Z,
-							30,
-							700
-						)
+				boxFrame.Visible = true
+			else
+				boxFrame.Visible = false
+			end
 
-					boxFrame.Size =
-						UDim2.new(
-							0,
-							sizeX,
-							0,
-							sizeY
-						)
+			if onScreen and rootPosition.Z > 0 and Db.States.EspLines then
+				local startX = Camera.ViewportSize.X / 2
+				local startY = Camera.ViewportSize.Y
 
-					boxFrame.Position =
-						UDim2.new(
-							0,
-							position.X - sizeX / 2,
-							0,
-							position.Y - sizeY / 2
-						)
+				local endX = rootPosition.X
+				local endY = rootPosition.Y
 
-					boxFrame.Visible = true
-				else
-					boxFrame.Visible = false
-				end
+				local deltaX = endX - startX
+				local deltaY = endY - startY
 
-				if onScreen
-					and position.Z > 0
-					and Db.States.EspLines then
+				local lineLength = math.sqrt(
+					deltaX * deltaX + deltaY * deltaY
+				)
 
-					local startX =
-						Camera.ViewportSize.X / 2
+				lineFrame.Size = UDim2.new(
+					0,
+					lineLength,
+					0,
+					1
+				)
 
-					local startY =
-						Camera.ViewportSize.Y
+				lineFrame.Position = UDim2.new(
+					0,
+					(startX + endX) / 2,
+					0,
+					(startY + endY) / 2
+				)
 
-					local endX = position.X
-					local endY = position.Y
+				lineFrame.Rotation = math.deg(
+					math.atan2(deltaY, deltaX)
+				)
 
-					local dx = endX - startX
-					local dy = endY - startY
+				lineFrame.Visible = true
+			else
+				lineFrame.Visible = false
+			end
+		end)
 
-					local length =
-						math.sqrt(
-							dx * dx + dy * dy
-						)
-
-					lineFrame.Size =
-						UDim2.new(
-							0,
-							length,
-							0,
-							1
-						)
-
-					lineFrame.Position =
-						UDim2.new(
-							0,
-							(startX + endX) / 2,
-							0,
-							(startY + endY) / 2
-						)
-
-					lineFrame.Rotation =
-						math.deg(
-							math.atan2(dy, dx)
-						)
-
-					lineFrame.Visible = true
-				else
-					lineFrame.Visible = false
-				end
-			end)
+		Db.Connections["ESP_" .. player.Name] = connection
 	end
 
 	if player.Character then
-		task.spawn(function()
-			InitCharacter(player.Character)
-		end)
+		task.spawn(Init, player.Character)
 	end
 
-	characterConnection =
-		player.CharacterAdded:Connect(function(character)
-			task.wait(0.5)
+	local characterConnection
 
-			if Db.States.EspCore then
-				InitCharacter(character)
-			end
-		end)
+	characterConnection = player.CharacterAdded:Connect(function(character)
+		if Db.States.EspCore then
+			task.spawn(Init, character)
+		end
+	end)
 
-	return characterConnection
+	Db.Connections["ESPCharacter_" .. player.Name] = characterConnection
 end
 
-AddButton(
-	"Visuals",
-	"Advanced Name/Dist ESP",
-	"EspCore",
-	function(state)
+--------------------------------------------------------------------------------------
+-- UNIVERSAL INTERFACE
+--------------------------------------------------------------------------------------
 
-		if state then
-			Disconnect("EspJoin")
+local function LoadUniversalInterface()
+	Title.Text = "Dexi Hub // Universal Client Engine"
 
-			for _, player in ipairs(Players:GetPlayers()) do
-				if player ~= LocalPlayer then
-					RenderVisuals(player)
-				end
+	RegisterTab("Combat", 1)
+	RegisterTab("Movement", 2)
+	RegisterTab("Visuals (ESP)", 3)
+	RegisterTab("Exploits", 4)
+	RegisterTab("World & Misc", 5)
+
+	----------------------------------------------------------------------------------
+	-- COMBAT
+	----------------------------------------------------------------------------------
+
+	AddButton(
+		"Combat",
+		"AimBot Head Target Lock",
+		"Aimbot",
+		function(state)
+			DisconnectConnection("Aimbot")
+
+			if not state then
+				AimCircleFrame.Visible = false
+				return
 			end
 
-			Db.Connections.EspJoin =
-				Players.PlayerAdded:Connect(
-					function(player)
-						if Db.States.EspCore then
-							RenderVisuals(player)
-						end
-					end
+			Db.Connections.Aimbot = RunService.RenderStepped:Connect(function()
+				local mousePosition = UserInputService:GetMouseLocation()
+
+				AimCircleFrame.Position = UDim2.new(
+					0,
+					mousePosition.X,
+					0,
+					mousePosition.Y
 				)
-		else
-			Disconnect("EspJoin")
 
-			for playerName in pairs(Db.EspCache) do
-				RemoveESP(playerName)
-			end
+				AimCircleFrame.Size = UDim2.new(
+					0,
+					Db.SliderValues.AimFov * 2,
+					0,
+					Db.SliderValues.AimFov * 2
+				)
 
-			for playerName in pairs(Db.BoxCache) do
-				RemoveESP(playerName)
-			end
+				AimCircleFrame.Visible = true
 
-			for playerName in pairs(Db.LinesCache) do
-				RemoveESP(playerName)
-			end
+				local target = GetClosestTarget()
+
+				if target
+					and target.Character
+					and target.Character:FindFirstChild("Head") then
+
+					local head = target.Character.Head
+
+					Camera.CFrame = Camera.CFrame:Lerp(
+						CFrame.new(
+							Camera.CFrame.Position,
+							head.Position
+						),
+						0.08
+					)
+				end
+			end)
 		end
-	end
-)
+	)
 
-AddButton(
-	"Visuals",
-	"2D Box ESP Frames",
-	"EspBox",
-	function()
-	end
-)
+	AddSlider(
+		"Combat",
+		"Aim Покрытие FOV",
+		30,
+		400,
+		150,
+		"AimFov",
+		function()
+		end
+	)
 
-AddButton(
-	"Visuals",
-	"Tracer Lines",
-	"EspLines",
-	function()
-	end
-)
+	AddButton(
+		"Combat",
+		"TriggerBot Auto M1 Click",
+		"Trigger",
+		function(state)
+			DisconnectConnection("Trigger")
 
-AddButton(
-	"Visuals",
-	"Chams Highlight",
-	"Chams",
-	function(state)
+			if not state then
+				return
+			end
 
-		if state then
-			Disconnect("Chams")
+			Db.Connections.Trigger = RunService.RenderStepped:Connect(function()
+				local mouse = LocalPlayer:GetMouse()
+				local target = mouse.Target
 
-			Db.Connections.Chams =
-				RunService.Heartbeat:Connect(function()
+				if target then
+					local model = target:FindFirstAncestorOfClass("Model")
+					local humanoid = model and model:FindFirstChildOfClass("Humanoid")
 
-					for _, player in ipairs(Players:GetPlayers()) do
-						if player ~= LocalPlayer
-							and player.Character then
+					if humanoid and model ~= LocalPlayer.Character then
+						local tool = LocalPlayer.Character
+							and LocalPlayer.Character:FindFirstChildOfClass("Tool")
 
-							if not player.Character:FindFirstChild(
-								"DexiOverloadChams"
-							) then
-
-								local highlight =
-									Instance.new("Highlight")
-
-								highlight.Name =
-									"DexiOverloadChams"
-
-								highlight.FillColor =
-									Color3.fromRGB(
-										140,
-										40,
-										255
-									)
-
-								highlight.OutlineColor =
-									Color3.fromRGB(
-										255,
-										255,
-										255
-									)
-
-								highlight.FillTransparency = 0.5
-								highlight.Parent = player.Character
-							end
+						if tool then
+							tool:Activate()
 						end
 					end
-				end)
-		else
-			Disconnect("Chams")
+				end
+			end)
+		end
+	)
 
-			for _, player in ipairs(Players:GetPlayers()) do
-				if player.Character then
-					local highlight =
-						player.Character:FindFirstChild(
-							"DexiOverloadChams"
+	AddButton(
+		"Combat",
+		"Hitbox Expander Parts",
+		"Hitbox",
+		function(state)
+			DisconnectConnection("Hitbox")
+
+			if not state then
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer
+						and player.Character
+						and player.Character:FindFirstChild("Head") then
+
+						player.Character.Head.Size = Vector3.new(2, 2, 2)
+					end
+				end
+
+				return
+			end
+
+			Db.Connections.Hitbox = RunService.Heartbeat:Connect(function()
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer
+						and player.Character
+						and player.Character:FindFirstChild("Head") then
+
+						local head = player.Character.Head
+
+						head.Size = Vector3.new(
+							Db.SliderValues.HitboxSize,
+							Db.SliderValues.HitboxSize,
+							Db.SliderValues.HitboxSize
 						)
 
-					if highlight then
-						highlight:Destroy()
+						head.CanCollide = false
 					end
+				end
+			end)
+		end
+	)
+
+	AddSlider(
+		"Combat",
+		"Размер хитбокса голов",
+		2,
+		15,
+		2,
+		"HitboxSize",
+		function()
+		end
+	)
+
+	----------------------------------------------------------------------------------
+	-- MOVEMENT
+	----------------------------------------------------------------------------------
+
+	AddSlider(
+		"Movement",
+		"Скорость WalkSpeed",
+		16,
+		250,
+		16,
+		"Speed",
+		function(value)
+			local humanoid = GetHum()
+
+			if humanoid then
+				humanoid.WalkSpeed = value
+			end
+		end
+	)
+
+	AddSlider(
+		"Movement",
+		"Прыжок JumpPower",
+		50,
+		350,
+		50,
+		"Jump",
+		function(value)
+			local humanoid = GetHum()
+
+			if humanoid then
+				humanoid.UseJumpPower = true
+				humanoid.JumpPower = value
+			end
+		end
+	)
+
+	AddButton(
+		"Movement",
+		"No-Clip Fly Hybrid",
+		"Fly",
+		function(state)
+			DisconnectConnection("Fly")
+
+			local root = GetRoot()
+			local humanoid = GetHum()
+
+			if not state then
+				if root then
+					local velocity = root:FindFirstChild("DexiOverloadFly")
+
+					if velocity then
+						velocity:Destroy()
+					end
+				end
+
+				if humanoid then
+					humanoid.PlatformStand = false
+				end
+
+				return
+			end
+
+			if not root or not humanoid then
+				return
+			end
+
+			local bodyVelocity = Instance.new("BodyVelocity")
+			bodyVelocity.Name = "DexiOverloadFly"
+			bodyVelocity.MaxForce = Vector3.new(
+				math.huge,
+				math.huge,
+				math.huge
+			)
+			bodyVelocity.Velocity = Vector3.zero
+			bodyVelocity.Parent = root
+
+			humanoid.PlatformStand = true
+
+			Db.Connections.Fly = RunService.RenderStepped:Connect(function()
+				if not root.Parent then
+					DisconnectConnection("Fly")
+					return
+				end
+
+				local direction = Vector3.zero
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+					direction += Camera.CFrame.LookVector
+				end
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+					direction -= Camera.CFrame.LookVector
+				end
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+					direction -= Camera.CFrame.RightVector
+				end
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+					direction += Camera.CFrame.RightVector
+				end
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+					direction += Vector3.new(0, 1, 0)
+				end
+
+				if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+					direction -= Vector3.new(0, 1, 0)
+				end
+
+				if direction.Magnitude > 0 then
+					bodyVelocity.Velocity =
+						direction.Unit * Db.SliderValues.FlySpeed
+				else
+					bodyVelocity.Velocity = Vector3.zero
+				end
+
+				local character = LocalPlayer.Character
+
+				if character then
+					for _, part in ipairs(character:GetChildren()) do
+						if part:IsA("BasePart") then
+							part.CanCollide = false
+						end
+					end
+				end
+			end)
+		end
+	)
+
+	AddSlider(
+		"Movement",
+		"Скорость Полета",
+		20,
+		300,
+		75,
+		"FlySpeed",
+		function()
+		end
+	)
+
+	AddButton(
+		"Movement",
+		"Toggle Always-On Noclip",
+		"Noclip",
+		function(state)
+			DisconnectConnection("Noclip")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.Noclip = RunService.Stepped:Connect(function()
+				local character = LocalPlayer.Character
+
+				if character then
+					for _, part in ipairs(character:GetChildren()) do
+						if part:IsA("BasePart") then
+							part.CanCollide = false
+						end
+					end
+				end
+			end)
+		end
+	)
+
+	AddButton(
+		"Movement",
+		"Velocity BHop Core",
+		"Bhop",
+		function(state)
+			DisconnectConnection("Bhop")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.Bhop = RunService.PreSimulation:Connect(function()
+				if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+					local humanoid = GetHum()
+
+					if humanoid
+						and humanoid.FloorMaterial ~= Enum.Material.Air then
+
+						humanoid:ChangeState(
+							Enum.HumanoidStateType.Jumping
+						)
+					end
+				end
+			end)
+		end
+	)
+
+	AddButton(
+		"Movement",
+		"Infinite Air Jump",
+		"InfJump",
+		function(state)
+			DisconnectConnection("InfJump")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.InfJump =
+				UserInputService.InputBegan:Connect(function(input, processed)
+					if processed then
+						return
+					end
+
+					if input.KeyCode == Enum.KeyCode.Space then
+						local humanoid = GetHum()
+
+						if humanoid then
+							humanoid:ChangeState(
+								Enum.HumanoidStateType.Jumping
+							)
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Movement",
+		"Auto-Anchoring",
+		"Anchor",
+		function(state)
+			local root = GetRoot()
+
+			if root then
+				root.Anchored = state
+			end
+		end
+	)
+
+	----------------------------------------------------------------------------------
+	-- VISUALS
+	----------------------------------------------------------------------------------
+
+	AddButton(
+		"Visuals (ESP)",
+		"Advanced Name/Dist ESP",
+		"EspCore",
+		function(state)
+			DisconnectConnection("EspJoin")
+
+			if state then
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer then
+						RenderVisuals(player)
+					end
+				end
+
+				Db.Connections.EspJoin =
+					Players.PlayerAdded:Connect(function(player)
+						RenderVisuals(player)
+					end)
+			else
+				for name in pairs(Db.EspCache) do
+					DisconnectConnection("ESP_" .. name)
+					DisconnectConnection("ESPCharacter_" .. name)
+					RemoveESP(name)
 				end
 			end
 		end
-	end
-)
+	)
 
---==================================================================================--
--- EXPLOITS
---==================================================================================--
-
-AddButton(
-	"Exploits",
-	"Anti-Aim Rotation",
-	"AntiAim",
-	function(state)
-
-		if state then
-			Disconnect("AntiAim")
-
-			Db.Connections.AntiAim =
-				RunService.Heartbeat:Connect(function()
-
-					local root = GetRoot()
-
-					if root then
-						root.CFrame =
-							root.CFrame
-							* CFrame.Angles(
-								0,
-								math.rad(
-									math.random(
-										1,
-										360
-									)
-								),
-								0
-							)
-					end
-				end)
-		else
-			Disconnect("AntiAim")
+	AddButton(
+		"Visuals (ESP)",
+		"2D Box ESP Frames",
+		"EspBox",
+		function()
 		end
-	end
-)
+	)
 
-AddButton(
-	"Exploits",
-	"High-Speed SpinBot",
-	"Spin",
-	function(state)
+	AddButton(
+		"Visuals (ESP)",
+		"Tracer Lines Render",
+		"EspLines",
+		function()
+		end
+	)
 
-		local root = GetRoot()
+	AddSlider(
+		"Visuals (ESP)",
+		"Ограничение дистанции ESP",
+		50,
+		2000,
+		500,
+		"EspDistance",
+		function()
+		end
+	)
 
-		if state and root then
-			local old =
-				root:FindFirstChild(
-					"DexiOverloadSpin"
-				)
+	AddButton(
+		"Visuals (ESP)",
+		"Chams Neon Highlight",
+		"Chams",
+		function(state)
+			DisconnectConnection("Chams")
 
-			if old then
-				old:Destroy()
+			if not state then
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player.Character then
+						local highlight =
+							player.Character:FindFirstChild("DexiOverloadChams")
+
+						if highlight then
+							highlight:Destroy()
+						end
+					end
+				end
+
+				return
 			end
 
-			local angular =
-				Instance.new("BodyAngularVelocity")
+			Db.Connections.Chams = RunService.Heartbeat:Connect(function()
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player ~= LocalPlayer and player.Character then
+						if not player.Character:FindFirstChild("DexiOverloadChams") then
+							local highlight = Instance.new("Highlight")
+							highlight.Name = "DexiOverloadChams"
+							highlight.FillColor = Color3.fromRGB(140, 40, 255)
+							highlight.Parent = player.Character
+						end
+					end
+				end
+			end)
+		end
+	)
 
-			angular.Name =
-				"DexiOverloadSpin"
+	----------------------------------------------------------------------------------
+	-- EXPLOITS
+	----------------------------------------------------------------------------------
 
-			angular.MaxTorque =
-				Vector3.new(
+	AddButton(
+		"Exploits",
+		"Anti-Aim Rotation Core",
+		"AntiAim",
+		function(state)
+			DisconnectConnection("AntiAim")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.AntiAim = RunService.Heartbeat:Connect(function()
+				local root = GetRoot()
+
+				if root then
+					root.CFrame =
+						root.CFrame *
+						CFrame.Angles(
+							0,
+							math.rad(math.random(1, 360)),
+							0
+						)
+				end
+			end)
+		end
+	)
+
+	AddButton(
+		"Exploits",
+		"High-Speed SpinBot",
+		"Spin",
+		function(state)
+			local root = GetRoot()
+
+			if not root then
+				return
+			end
+
+			if state then
+				if root:FindFirstChild("DexiOverloadSpin") then
+					return
+				end
+
+				local angularVelocity = Instance.new("BodyAngularVelocity")
+				angularVelocity.Name = "DexiOverloadSpin"
+				angularVelocity.AngularVelocity = Vector3.new(0, 180, 0)
+				angularVelocity.MaxTorque = Vector3.new(
 					0,
 					math.huge,
 					0
 				)
+				angularVelocity.Parent = root
+			else
+				local angularVelocity =
+					root:FindFirstChild("DexiOverloadSpin")
 
-			angular.AngularVelocity =
-				Vector3.new(
-					0,
-					150,
-					0
-				)
-
-			angular.Parent = root
-		else
-			if root then
-				local angular =
-					root:FindFirstChild(
-						"DexiOverloadSpin"
-					)
-
-				if angular then
-					angular:Destroy()
+				if angularVelocity then
+					angularVelocity:Destroy()
 				end
 			end
 		end
-	end
-)
+	)
 
-AddButton(
-	"Exploits",
-	"Fake Lag Simulator",
-	"FakeLagActive",
-	function(state)
+	AddButton(
+		"Exploits",
+		"Fake Lag Simulator Engine",
+		"FakeLagActive",
+		function(state)
+			DisconnectConnection("FakeLag")
 
-		if state then
-			Disconnect("FakeLag")
+			if not state then
+				local root = GetRoot()
 
-			local timer = 0
+				if root then
+					root.Anchored = false
+				end
+
+				return
+			end
 
 			Db.Connections.FakeLag =
-				RunService.Heartbeat:Connect(function(deltaTime)
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
 
-					timer += deltaTime
+					if root then
+						root.Anchored = true
 
-					local delaySeconds =
-						Db.SliderValues.FakeLag / 1000
-
-					if timer >= delaySeconds then
-						timer = 0
-
-						local root = GetRoot()
-
-						if root then
-							root.Anchored = not root.Anchored
-						end
+						task.delay(
+							Db.SliderValues.FakeLag / 1000,
+							function()
+								if root and root.Parent then
+									root.Anchored = false
+								end
+							end
+						)
 					end
 				end)
-		else
-			Disconnect("FakeLag")
+		end
+	)
 
-			local root = GetRoot()
+	AddSlider(
+		"Exploits",
+		"Задержка Fake Lag (мс)",
+		0,
+		500,
+		0,
+		"FakeLag",
+		function()
+		end
+	)
 
-			if root then
-				root.Anchored = false
+	----------------------------------------------------------------------------------
+	-- WORLD & MISC
+	----------------------------------------------------------------------------------
+
+	AddButton(
+		"World & Misc",
+		"FullBright Ambient Render",
+		"FB",
+		function(state)
+			if state then
+				Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+				Lighting.Brightness = 2.5
+			else
+				Lighting.Ambient = Color3.fromRGB(120, 120, 120)
+				Lighting.Brightness = 1
 			end
 		end
-	end
-)
+	)
 
-AddSlider(
-	"Exploits",
-	"Задержка Fake Lag (мс)",
-	0,
-	500,
-	0,
-	"FakeLag",
-	function()
-	end
-)
-
---==================================================================================--
--- WORLD & MISC
---==================================================================================--
-
-local OriginalLighting = {
-	Ambient = Lighting.Ambient,
-	Brightness = Lighting.Brightness,
-	OutdoorAmbient = Lighting.OutdoorAmbient
-}
-
-AddButton(
-	"World & Misc",
-	"FullBright Ambient",
-	"FB",
-	function(state)
-
-		if state then
-			Lighting.Ambient =
-				Color3.fromRGB(
-					255,
-					255,
-					255
-				)
-
-			Lighting.Brightness = 2.5
-
-			Lighting.OutdoorAmbient =
-				Color3.fromRGB(
-					255,
-					255,
-					255
-				)
-		else
-			Lighting.Ambient =
-				OriginalLighting.Ambient
-
-			Lighting.Brightness =
-				OriginalLighting.Brightness
-
-			Lighting.OutdoorAmbient =
-				OriginalLighting.OutdoorAmbient
+	AddSlider(
+		"World & Misc",
+		"Контроль времени суток",
+		0,
+		23,
+		14,
+		"Time",
+		function(value)
+			Lighting.ClockTime = value
 		end
-	end
-)
+	)
 
-AddSlider(
-	"World & Misc",
-	"Контроль времени суток",
-	0,
-	23,
-	14,
-	"Time",
-	function(value)
-		Lighting.ClockTime = value
-	end
-)
+	AddButton(
+		"World & Misc",
+		"Map X-Ray Textures",
+		"Xray",
+		function(state)
+			for _, object in ipairs(workspace:GetDescendants()) do
+				if object:IsA("BasePart") then
+					local character = LocalPlayer.Character
 
-AddButton(
-	"World & Misc",
-	"Map X-Ray Textures",
-	"Xray",
-	function(state)
+					if not character
+						or not object:IsDescendantOf(character) then
 
-		for _, object in ipairs(workspace:GetDescendants()) do
+						local parent = object.Parent
+						local hasHumanoid = parent
+							and parent:FindFirstChildOfClass("Humanoid")
 
-			if object:IsA("BasePart")
-				and not object:IsDescendantOf(
-					LocalPlayer.Character
-						or workspace
-				)
-				and not object.Parent:FindFirstChildOfClass(
-					"Humanoid"
-				) then
+						if not hasHumanoid then
+							if state then
+								if object:GetAttribute("DexiOldTransparency") == nil then
+									object:SetAttribute(
+										"DexiOldTransparency",
+										object.Transparency
+									)
+								end
 
-				if state then
-					if object:GetAttribute("DexiOldTransparency")
-						== nil then
+								object.Transparency = 0.65
+							else
+								local oldTransparency =
+									object:GetAttribute(
+										"DexiOldTransparency"
+									)
 
-						object:SetAttribute(
-							"DexiOldTransparency",
-							object.Transparency
-						)
-					end
-
-					object.Transparency = 0.65
-				else
-					local old =
-						object:GetAttribute(
-							"DexiOldTransparency"
-						)
-
-					if old ~= nil then
-						object.Transparency = old
-
-						object:SetAttribute(
-							"DexiOldTransparency",
-							nil
-						)
+								if oldTransparency ~= nil then
+									object.Transparency = oldTransparency
+									object:SetAttribute(
+										"DexiOldTransparency",
+										nil
+									)
+								end
+							end
+						end
 					end
 				end
 			end
 		end
-	end
-)
+	)
 
-AddButton(
-	"World & Misc",
-	"AutoClicker (Зажмите T)",
-	"Clicker",
-	function(state)
+	AddButton(
+		"World & Misc",
+		"Map Destroyer (Локальная очистка)",
+		"Universal_DestroyMap",
+		function(state)
+			if not state then
+				return
+			end
 
-		if state then
-			Disconnect("Clicker")
+			for _, item in ipairs(workspace:GetChildren()) do
+				if (item:IsA("Folder") or item:IsA("Model"))
+					and item ~= Camera
+					and not item:FindFirstChildOfClass("Humanoid") then
+
+					pcall(function()
+						item:Destroy()
+					end)
+				end
+			end
+
+			Notify("Карта локально очищена")
+
+			Db.States.Universal_DestroyMap = false
+		end
+	)
+
+	AddButton(
+		"World & Misc",
+		"AutoClicker M1 Tool Click",
+		"Clicker",
+		function(state)
+			DisconnectConnection("Clicker")
+
+			if not state then
+				return
+			end
 
 			Db.Connections.Clicker =
 				RunService.RenderStepped:Connect(function()
-
-					if UserInputService:IsKeyDown(
-						Enum.KeyCode.T
-					) then
-
-						local character =
-							LocalPlayer.Character
-
-						local tool =
-							character
-							and character:FindFirstChildOfClass(
-								"Tool"
-							)
+					if UserInputService:IsKeyDown(Enum.KeyCode.T) then
+						local character = LocalPlayer.Character
+						local tool = character
+							and character:FindFirstChildOfClass("Tool")
 
 						if tool then
 							tool:Activate()
 						end
 					end
 				end)
-		else
-			Disconnect("Clicker")
 		end
-	end
-)
+	)
 
-AddButton(
-	"World & Misc",
-	"Anti-AFK Core",
-	"AntiAfk",
-	function(state)
+	AddButton(
+		"World & Misc",
+		"Anti-AFK Core",
+		"AntiAfk",
+		function(state)
+			DisconnectConnection("Afk")
 
-		if state then
-			Disconnect("Afk")
+			if not state then
+				return
+			end
 
 			Db.Connections.Afk =
 				LocalPlayer.Idled:Connect(function()
-
 					VirtualUser:CaptureController()
-
 					VirtualUser:ClickButton2(
 						Vector2.new(0, 0)
 					)
 				end)
-		else
-			Disconnect("Afk")
 		end
+	)
+end
+
+--------------------------------------------------------------------------------------
+-- GAME-SPECIFIC MODULES
+--------------------------------------------------------------------------------------
+
+local function LoadJujutsuShenanigans()
+	Title.Text = "Dexi Hub // Jujutsu Shenanigans"
+
+	RegisterTab("Combat Exploits", 1)
+	RegisterTab("Movement Mechanics", 2)
+	RegisterTab("Visual Trackers", 3)
+
+	AddButton(
+		"Combat Exploits",
+		"Auto Black Flash Chain",
+		"JJK_AutoBF",
+		function(state)
+			DisconnectConnection("JjkBf")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.JjkBf =
+				RunService.Heartbeat:Connect(function()
+					local character = LocalPlayer.Character
+
+					if not character then
+						return
+					end
+
+					if character:FindFirstChild("BlackFlash")
+						or character:FindFirstChild("Combat") then
+
+						local tool =
+							character:FindFirstChildOfClass("Tool")
+
+						if tool then
+							tool:Activate()
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Combat Exploits",
+		"Instant Blackhole CFrame Pull",
+		"JJK_Blackhole",
+		function(state)
+			DisconnectConnection("Blackhole")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.Blackhole =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							local targetRoot =
+								player.Character:FindFirstChild(
+									"HumanoidRootPart"
+								)
+
+							if targetRoot then
+								if (
+									targetRoot.Position - root.Position
+								).Magnitude < 60 then
+
+									targetRoot.CFrame =
+										root.CFrame *
+										CFrame.new(0, 0, -4)
+								end
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Combat Exploits",
+		"Auto-Parry Core Block Assist",
+		"JJK_Parry",
+		function(state)
+			DisconnectConnection("JjkParry")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.JjkParry =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							local attacking =
+								player.Character:FindFirstChild("Attacking")
+
+							local targetRoot =
+								player.Character:FindFirstChild(
+									"HumanoidRootPart"
+								)
+
+							if attacking and targetRoot then
+								if (
+									targetRoot.Position - root.Position
+								).Magnitude < 15 then
+
+									local block =
+										LocalPlayer.Character
+										and LocalPlayer.Character:FindFirstChild(
+											"Block"
+										)
+
+									if block then
+										block:Activate()
+									end
+								end
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Combat Exploits",
+		"Kill Aura Execution Area",
+		"JjkAura",
+		function(state)
+			DisconnectConnection("JjkAura")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.JjkAura =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							local targetRoot =
+								player.Character:FindFirstChild(
+									"HumanoidRootPart"
+								)
+
+							local humanoid =
+								player.Character:FindFirstChildOfClass(
+									"Humanoid"
+								)
+
+							if targetRoot and humanoid and humanoid.Health > 0 then
+								if (
+									targetRoot.Position - root.Position
+								).Magnitude <= Db.SliderValues.KillAuraDist then
+
+									local tool =
+										LocalPlayer.Character
+										and LocalPlayer.Character:FindFirstChildOfClass(
+											"Tool"
+										)
+
+									if tool then
+										tool:Activate()
+									end
+								end
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddSlider(
+		"Combat Exploits",
+		"Радиус Aura Атаки",
+		5,
+		60,
+		25,
+		"KillAuraDist",
+		function()
+		end
+	)
+
+	AddButton(
+		"Movement Mechanics",
+		"Infinite Dashes Fluid Q",
+		"JJK_InfDashes",
+		function(state)
+			DisconnectConnection("JjkDash")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.JjkDash =
+				UserInputService.InputBegan:Connect(function(input, processed)
+					if processed then
+						return
+					end
+
+					if input.KeyCode == Enum.KeyCode.Q then
+						local root = GetRoot()
+
+						if root then
+							root.AssemblyLinearVelocity =
+								root.CFrame.LookVector *
+								Db.SliderValues.JjkDashPower
+						end
+					end
+				end)
+		end
+	)
+
+	AddSlider(
+		"Movement Mechanics",
+		"Сила Q-Рывка (Dash)",
+		20,
+		250,
+		90,
+		"JjkDashPower",
+		function()
+		end
+	)
+
+	AddSlider(
+		"Movement Mechanics",
+		"WalkSpeed Скорость ходьбы",
+		16,
+		250,
+		16,
+		"Speed",
+		function(value)
+			local humanoid = GetHum()
+
+			if humanoid then
+				humanoid.WalkSpeed = value
+			end
+		end
+	)
+
+	AddButton(
+		"Movement Mechanics",
+		"No-Ragdoll Fast GetUp",
+		"JJK_NoRag",
+		function(state)
+			DisconnectConnection("JjkRag")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.JjkRag =
+				RunService.Heartbeat:Connect(function()
+					local humanoid = GetHum()
+
+					if humanoid
+						and humanoid:GetState()
+							== Enum.HumanoidStateType.Ragdoll then
+
+						humanoid:ChangeState(
+							Enum.HumanoidStateType.GettingUp
+						)
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Visual Trackers",
+		"Player Neon Highlights (Chams)",
+		"JJK_Chams",
+		function(state)
+			DisconnectConnection("JJK_Chams")
+
+			if not state then
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player.Character then
+						local highlight =
+							player.Character:FindFirstChild("JjkChams")
+
+						if highlight then
+							highlight:Destroy()
+						end
+					end
+				end
+
+				return
+			end
+
+			Db.Connections.JJK_Chams =
+				RunService.Heartbeat:Connect(function()
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer and player.Character then
+							if not player.Character:FindFirstChild("JjkChams") then
+								local highlight = Instance.new("Highlight")
+								highlight.Name = "JjkChams"
+								highlight.FillColor =
+									Color3.fromRGB(140, 40, 255)
+								highlight.Parent = player.Character
+							end
+						end
+					end
+				end)
+		end
+	)
+end
+
+--------------------------------------------------------------------------------------
+-- 99 NIGHTS IN THE FOREST
+--------------------------------------------------------------------------------------
+
+local function Load99Nights()
+	Title.Text = "Dexi Hub // 99 Nights In The Forest"
+
+	RegisterTab("Automation Farm", 1)
+	RegisterTab("Map Overrides", 2)
+
+	AddButton(
+		"Automation Farm",
+		"GodMode Client Health",
+		"VW_God",
+		function(state)
+			DisconnectConnection("God")
+
+			if not state then
+				local humanoid = GetHum()
+
+				if humanoid then
+					humanoid.MaxHealth = 100
+					humanoid.Health = math.min(
+						humanoid.Health,
+						humanoid.MaxHealth
+					)
+				end
+
+				return
+			end
+
+			Db.Connections.God =
+				RunService.Heartbeat:Connect(function()
+					local humanoid = GetHum()
+
+					if humanoid then
+						humanoid.MaxHealth = math.huge
+						humanoid.Health = math.huge
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Automation Farm",
+		"Bring & Auto-Store Drops",
+		"VW_BringStore",
+		function(state)
+			DisconnectConnection("BringStore")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.BringStore =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					local box = workspace:FindFirstChild("StorageBox")
+
+					for _, item in ipairs(workspace:GetChildren()) do
+						if item:IsA("BasePart") then
+							local lowerName = item.Name:lower()
+
+							if lowerName:find("wood")
+								or lowerName:find("drop") then
+
+								if box and box:IsA("BasePart") then
+									item.CFrame = box.CFrame
+								else
+									item.CFrame = root.CFrame
+								end
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Automation Farm",
+		"Instant One-Tap Tree Cut",
+		"VW_OneTapChop",
+		function(state)
+			DisconnectConnection("OneTap")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.OneTap =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					for _, tree in ipairs(workspace:GetDescendants()) do
+						if tree:IsA("Model")
+							and tree.Name:lower():find("tree") then
+
+							local primary = tree.PrimaryPart
+
+							if primary
+								and (
+									primary.Position - root.Position
+								).Magnitude < 30 then
+
+								tree:Destroy()
+								break
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Map Overrides",
+		"Clear Monster Entities",
+		"VW_Clear",
+		function(state)
+			if not state then
+				return
+			end
+
+			for _, npc in ipairs(workspace:GetChildren()) do
+				if npc:IsA("Model")
+					and npc:FindFirstChildOfClass("Humanoid")
+					and not Players:GetPlayerFromCharacter(npc) then
+
+					npc:Destroy()
+				end
+			end
+
+			Notify("Монстры стерты")
+			Db.States.VW_Clear = false
+		end
+	)
+
+	AddButton(
+		"Map Overrides",
+		"Disable Forest Thick Fog",
+		"VW_NoFog",
+		function(state)
+			if state then
+				Lighting.FogEnd = 999999
+			else
+				Lighting.FogEnd = 150
+			end
+		end
+	)
+end
+
+--------------------------------------------------------------------------------------
+-- STEAL AN EGG
+--------------------------------------------------------------------------------------
+
+local function LoadStealAnEgg()
+	Title.Text = "Dexi Hub // Steal An Egg"
+
+	RegisterTab("Turbo Farm", 1)
+
+	AddButton(
+		"Turbo Farm",
+		"Egg Magnet Pull Aura",
+		"Fox_Magnet",
+		function(state)
+			DisconnectConnection("FoxMagnet")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.FoxMagnet =
+				RunService.Heartbeat:Connect(function()
+					local root = GetRoot()
+
+					if not root then
+						return
+					end
+
+					for _, object in ipairs(workspace:GetDescendants()) do
+						if object:IsA("BasePart")
+							and object.Name:lower():find("egg") then
+
+							if (
+								object.Position - root.Position
+							).Magnitude < 150 then
+
+								object.CFrame = root.CFrame
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Turbo Farm",
+		"Instant Teleport Auto-Sell",
+		"Fox_TurboFarm",
+		function(state)
+			DisconnectConnection("FoxTurbo")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.FoxTurbo = task.spawn(function()
+				while Db.States.Fox_TurboFarm and not Destroyed do
+					local root = GetRoot()
+
+					if root then
+						for _, object in ipairs(workspace:GetDescendants()) do
+							if object:IsA("BasePart")
+								and object.Name:lower():find("egg") then
+
+								root.CFrame = object.CFrame
+								task.wait(0.05)
+							end
+						end
+
+						local altar =
+							workspace:FindFirstChild("EggAltar")
+
+						if altar then
+							if altar:IsA("Model") then
+								local pivot = altar:GetPivot()
+								root.CFrame = pivot
+							elseif altar:IsA("BasePart") then
+								root.CFrame = altar.CFrame
+							end
+
+							task.wait(0.1)
+						end
+					end
+
+					task.wait(0.5)
+				end
+			end)
+		end
+	)
+end
+
+--------------------------------------------------------------------------------------
+-- MURDER MYSTERY 2
+--------------------------------------------------------------------------------------
+
+local function LoadMM2()
+	Title.Text = "Dexi Hub // Murder Mystery 2"
+
+	RegisterTab("Onyx Combat", 1)
+	RegisterTab("Onyx Vision", 2)
+
+	AddButton(
+		"Onyx Combat",
+		"Knife Kill Aura Execution",
+		"MM2_KnifeAura",
+		function(state)
+			DisconnectConnection("KnifeAura")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.KnifeAura =
+				RunService.Heartbeat:Connect(function()
+					local character = LocalPlayer.Character
+
+					if not character then
+						return
+					end
+
+					local knife =
+						character:FindFirstChild("Knife")
+						or LocalPlayer.Backpack:FindFirstChild("Knife")
+
+					local root = GetRoot()
+
+					if not knife or not root then
+						return
+					end
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer
+							and player.Character then
+
+							local targetRoot =
+								player.Character:FindFirstChild(
+									"HumanoidRootPart"
+								)
+
+							local humanoid =
+								player.Character:FindFirstChildOfClass(
+									"Humanoid"
+								)
+
+							if targetRoot
+								and humanoid
+								and humanoid.Health > 0 then
+
+								if (
+									targetRoot.Position - root.Position
+								).Magnitude < 18 then
+
+									if not character:FindFirstChild("Knife") then
+										if knife:IsA("Tool") then
+											humanoid:EquipTool(knife)
+										end
+									end
+
+									if knife:IsA("Tool") then
+										knife:Activate()
+									end
+								end
+							end
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Onyx Combat",
+		"Fling Murderer Tool",
+		"MM2_Fling",
+		function(state)
+			DisconnectConnection("Fling")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.Fling =
+				RunService.Heartbeat:Connect(function()
+					local target = nil
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						local hasKnife =
+							player.Backpack:FindFirstChild("Knife")
+							or (
+								player.Character
+								and player.Character:FindFirstChild("Knife")
+							)
+
+						if hasKnife then
+							target = player
+							break
+						end
+					end
+
+					local root = GetRoot()
+
+					if target
+						and target.Character
+						and root then
+
+						local targetRoot =
+							target.Character:FindFirstChild(
+								"HumanoidRootPart"
+							)
+
+						if targetRoot then
+							root.CFrame = targetRoot.CFrame
+							root.AssemblyLinearVelocity =
+								Vector3.new(
+									0,
+									Db.SliderValues.FlingPower,
+									0
+								)
+						end
+					end
+				end)
+		end
+	)
+
+	AddSlider(
+		"Onyx Combat",
+		"Мощность вышибания (Fling)",
+		10000,
+		200000,
+		50000,
+		"FlingPower",
+		function()
+		end
+	)
+
+	AddButton(
+		"Onyx Combat",
+		"Sheriff Silent Aim System",
+		"MM2_SilentAim",
+		function(state)
+			DisconnectConnection("Silent")
+
+			if not state then
+				return
+			end
+
+			Db.Connections.Silent =
+				RunService.RenderStepped:Connect(function()
+					local character = LocalPlayer.Character
+					local gun = character
+						and character:FindFirstChild("Gun")
+
+					if not gun then
+						return
+					end
+
+					local murderer = nil
+
+					for _, player in ipairs(Players:GetPlayers()) do
+						local hasKnife =
+							player.Backpack:FindFirstChild("Knife")
+							or (
+								player.Character
+								and player.Character:FindFirstChild("Knife")
+							)
+
+						if hasKnife then
+							murderer = player
+							break
+						end
+					end
+
+					if murderer
+						and murderer.Character then
+
+						local head =
+							murderer.Character:FindFirstChild("Head")
+
+						if head then
+							Camera.CFrame = CFrame.new(
+								Camera.CFrame.Position,
+								head.Position
+							)
+						end
+					end
+				end)
+		end
+	)
+
+	AddButton(
+		"Onyx Vision",
+		"Visual Role Highlighter Highlight",
+		"MM2_ESP",
+		function(state)
+			DisconnectConnection("Mm2Esp")
+
+			if not state then
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player.Character then
+						local highlight =
+							player.Character:FindFirstChild("OnyxEsp")
+
+						if highlight then
+							highlight:Destroy()
+						end
+					end
+				end
+
+				return
+			end
+
+			Db.Connections.Mm2Esp =
+				RunService.Heartbeat:Connect(function()
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer and player.Character then
+							local highlight =
+								player.Character:FindFirstChild("OnyxEsp")
+
+							if not highlight then
+								highlight = Instance.new("Highlight")
+								highlight.Name = "OnyxEsp"
+								highlight.Parent = player.Character
+							end
+
+							local hasKnife =
+								player.Backpack:FindFirstChild("Knife")
+								or player.Character:FindFirstChild("Knife")
+
+							local hasGun =
+								player.Backpack:FindFirstChild("Gun")
+								or player.Character:FindFirstChild("Gun")
+
+							if hasKnife then
+								highlight.FillColor =
+									Color3.fromRGB(255, 0, 0)
+							elseif hasGun then
+								highlight.FillColor =
+									Color3.fromRGB(0, 0, 255)
+							else
+								highlight.FillColor =
+									Color3.fromRGB(0, 255, 0)
+							end
+						end
+					end
+				end)
+		end
+	)
+end
+
+--------------------------------------------------------------------------------------
+-- GAME DETECTION
+--------------------------------------------------------------------------------------
+
+task.spawn(function()
+	task.wait(0.1)
+
+	if Destroyed then
+		return
 	end
-)
 
---==================================================================================--
--- WINDOW DRAGGING
---==================================================================================--
+	if CurrentPlaceId == 9391468976 then
+		LoadJujutsuShenanigans()
 
-local dragging = false
-local dragInput = nil
-local dragStart = nil
-local startPosition = nil
+	elseif CurrentPlaceId == 79546208627805
+		or game.GameId == 7954620862 then
+
+		Load99Nights()
+
+	elseif CurrentPlaceId == 107778070777162 then
+		LoadStealAnEgg()
+
+	elseif CurrentPlaceId == 142823291 then
+		LoadMM2()
+
+	else
+		LoadUniversalInterface()
+	end
+
+	Notify("Dexi Hub загружен! Автоопределение завершено.")
+end)
+
+--------------------------------------------------------------------------------------
+-- DRAGGING
+--------------------------------------------------------------------------------------
+
+local Dragging = false
+local DragInput = nil
+local DragStart = nil
+local StartPosition = nil
 
 Header.InputBegan:Connect(function(input)
-
-	if input.UserInputType
-		== Enum.UserInputType.MouseButton1 then
-
-		dragging = true
-		dragStart = input.Position
-		startPosition = MainFrame.Position
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		Dragging = true
+		DragStart = input.Position
+		StartPosition = MainFrame.Position
 
 		input.Changed:Connect(function()
-
-			if input.UserInputState
-				== Enum.UserInputState.End then
-
-				dragging = false
+			if input.UserInputState == Enum.UserInputState.End then
+				Dragging = false
 			end
 		end)
 	end
 end)
 
 Header.InputChanged:Connect(function(input)
-
-	if input.UserInputType
-		== Enum.UserInputType.MouseMovement then
-
-		dragInput = input
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		DragInput = input
 	end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
+	if input == DragInput and Dragging then
+		local delta = input.Position - DragStart
 
-	if input == dragInput and dragging then
-
-		local delta =
-			input.Position - dragStart
-
-		MainFrame.Position =
-			UDim2.new(
-				startPosition.X.Scale,
-				startPosition.X.Offset + delta.X,
-				startPosition.Y.Scale,
-				startPosition.Y.Offset + delta.Y
-			)
+		MainFrame.Position = UDim2.new(
+			StartPosition.X.Scale,
+			StartPosition.X.Offset + delta.X,
+			StartPosition.Y.Scale,
+			StartPosition.Y.Offset + delta.Y
+		)
 	end
 end)
 
---==================================================================================--
--- V = TOGGLE MENU
---==================================================================================--
+--------------------------------------------------------------------------------------
+-- GLOBAL KEYBINDS
+--------------------------------------------------------------------------------------
 
-Db.Connections.MenuToggle =
-	UserInputService.InputBegan:Connect(
-		function(input, processed)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
 
-			if processed then
-				return
-			end
+	if BindingKey and BindingButton then
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			local keyCode = input.KeyCode
 
-			if input.KeyCode == Enum.KeyCode.V
-				and MainFrame.Parent then
+			if keyCode ~= Enum.KeyCode.Unknown then
+				local data = Db.Keybinds[BindingKey]
 
-				MainFrame.Visible =
-					not MainFrame.Visible
+				if data then
+					data.Key = keyCode
+					data.Button.Text = keyCode.Name
+				end
+
+				BindingKey = nil
+				BindingButton = nil
 			end
 		end
-	)
 
---==================================================================================--
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.V then
+		if MainFrame then
+			MainFrame.Visible = not MainFrame.Visible
+		end
+
+		return
+	end
+
+	for _, data in pairs(Db.Keybinds) do
+		if data.Key and input.KeyCode == data.Key then
+			data.Action()
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------------
 -- CHARACTER RESPAWN HANDLER
---==================================================================================--
+--------------------------------------------------------------------------------------
 
-Db.Connections.CharacterAdded =
-	LocalPlayer.CharacterAdded:Connect(function(character)
+LocalPlayer.CharacterAdded:Connect(function(character)
+	task.wait(0.7)
 
-		task.wait(0.7)
+	if Destroyed then
+		return
+	end
 
-		local humanoid =
-			character:WaitForChild(
-				"Humanoid",
-				5
-			)
+	local humanoid = character:WaitForChild("Humanoid", 5)
 
-		if not humanoid then
-			return
-		end
+	if not humanoid then
+		return
+	end
 
-		humanoid.WalkSpeed =
-			Db.SliderValues.Speed
+	humanoid.WalkSpeed = Db.SliderValues.Speed
 
+	if Db.SliderValues.Jump > 50 then
 		humanoid.UseJumpPower = true
-		humanoid.JumpPower =
-			Db.SliderValues.Jump
+		humanoid.JumpPower = Db.SliderValues.Jump
+	end
 
-		if Db.States.Anchor then
-			local root =
-				character:FindFirstChild(
-					"HumanoidRootPart"
-				)
-
-			if root then
-				root.Anchored = true
+	if Db.States.Noclip then
+		for _, part in ipairs(character:GetChildren()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
 			end
 		end
-	end)
+	end
+end)
 
---==================================================================================--
--- INITIALIZATION
---==================================================================================--
-
-Notify(
-	"Dexi Script инициализирован! Нажмите [V]"
-)
+Notify("Dexi Hub инициализирован.")
