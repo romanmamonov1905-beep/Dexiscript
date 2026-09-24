@@ -120,9 +120,6 @@ local Config = {
     AimVisibleCheck = true,
     AimSticky = false,
 
-    AutoFire = false,
-    AutoFireDelay = 0.16,
-
     FOV = 70,
     ThirdPerson = false,
     CameraDistance = 10,
@@ -175,15 +172,12 @@ local UINotifications
 
 local CurrentTarget
 local SelectedTarget
-local LastAutoFire = 0
 local TouchFlingDebounce = false
 local deleteConfirmUntil = 0
 
--- Forward declarations used by the Auto Fire section above Aim helpers.
 local IsValidTargetPlayer
 local FindAimTarget
 
-local ESP = {}
 local Tracers = {}
 
 local FlyAttachment
@@ -2018,28 +2012,6 @@ Dropdown(
     end
 )
 
-Toggle(
-    AimPage,
-    "Auto Fire",
-    function()
-        return Config.AutoFire
-    end,
-    function(value)
-        Config.AutoFire = value
-    end
-)
-
-Slider(
-    AimPage,
-    "Auto Fire Delay",
-    0.05,
-    0.50,
-    Config.AutoFireDelay,
-    function(value)
-        Config.AutoFireDelay = value
-    end
-)
-
 local AimKeyButton = Button(
     AimPage,
     "[KEY]  Aim Key: -",
@@ -2081,124 +2053,6 @@ local AimKeyButton = Button(
         end)
     end
 )
-
---============================================================
--- AUTO FIRE / TRIGGERBOT
---============================================================
-
-local function GetEquippedTool()
-    if not Character then
-        return nil
-    end
-
-    return Character:FindFirstChildOfClass("Tool")
-end
-
-local function GetAutoFireTarget()
-    if not Config.AimAssist then
-        return nil
-    end
-
-    if CurrentTarget
-        and IsValidTargetPlayer(CurrentTarget)
-    then
-        return CurrentTarget
-    end
-
-    return FindAimTarget()
-end
-
-local function FireEquippedTool(tool)
-    if not tool or tool.Enabled == false then
-        return false
-    end
-
-    -- On touch devices, prefer an actual local tap-style input.
-    if UIS.TouchEnabled
-        and not UIS.MouseEnabled
-    then
-        local tapped = pcall(function()
-            VirtualUser:CaptureController()
-
-            local viewport = Camera.ViewportSize
-            local center = Vector2.new(
-                viewport.X / 2,
-                viewport.Y / 2
-            )
-
-            VirtualUser:ClickButton1(
-                center,
-                Camera.CFrame
-            )
-        end)
-
-        if tapped then
-            return true
-        end
-    end
-
-    -- Standard Tool activation for PC and for tools that expose
-    -- their shooting logic through Tool:Activate().
-    local activated = pcall(function()
-        tool:Activate()
-    end)
-
-    -- Last local-input fallback if Tool:Activate() is rejected.
-    if not activated then
-        pcall(function()
-            VirtualUser:CaptureController()
-
-            local viewport = Camera.ViewportSize
-            local center = Vector2.new(
-                viewport.X / 2,
-                viewport.Y / 2
-            )
-
-            VirtualUser:ClickButton1(
-                center,
-                Camera.CFrame
-            )
-        end)
-    end
-
-    return activated
-end
-
-local function UpdateAutoFire()
-    if not Config.AutoFire
-        or not Config.AimAssist
-    then
-        return
-    end
-
-    local target = GetAutoFireTarget()
-
-    if not target
-        or not IsValidTargetPlayer(target)
-    then
-        CurrentTarget = nil
-        return
-    end
-
-    CurrentTarget = target
-
-    local tool = GetEquippedTool()
-
-    if not tool then
-        return
-    end
-
-    local now = os.clock()
-
-    if now - LastAutoFire <
-        Config.AutoFireDelay
-    then
-        return
-    end
-
-    FireEquippedTool(tool)
-    LastAutoFire = now
-end
 
 --============================================================
 -- CAMERA
@@ -3721,180 +3575,269 @@ aimStroke.Parent = AimCircle
 -- ESP
 --============================================================
 
-local function RemoveESP(player)
-    local data = ESP[player]
+local ESP = {}
 
+local function DestroyESPObjects(data)
     if not data then
         return
     end
 
-    for _, obj in pairs(data) do
-        if typeof(obj) == "Instance" then
-            obj:Destroy()
-        end
+    if data.Highlight then
+        data.Highlight:Destroy()
+        data.Highlight = nil
     end
 
-    ESP[player] = nil
+    if data.Billboard then
+        data.Billboard:Destroy()
+        data.Billboard = nil
+        data.Info = nil
+    end
 end
 
-local function CreateESP(player)
-    if player == LocalPlayer then
-        return
+local function GetESPAnchor(character)
+    return character:FindFirstChild("Head")
+        or character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChildWhichIsA("BasePart")
+end
+
+local function GetESPData(player)
+    local data = ESP[player]
+
+    if not data then
+        data = {
+            Character = nil,
+            Highlight = nil,
+            Billboard = nil,
+            Info = nil,
+        }
+        ESP[player] = data
     end
 
-    if not player.Character then
-        return
+    return data
+end
+
+local function EnsureESPObjects(player, character)
+    if player == LocalPlayer or not character then
+        return nil
     end
 
-    if ESP[player] then
-        return
+    local data = GetESPData(player)
+
+    if data.Character ~= character then
+        DestroyESPObjects(data)
+        data.Character = character
     end
 
-    if Config.ESPTeamCheck
-        and LocalPlayer.Team
-        and player.Team == LocalPlayer.Team
-    then
-        return
-    end
-
-    local character = player.Character
-
-    local humanoid =
-        character:FindFirstChildOfClass("Humanoid")
-
-    local targetRoot =
-        character:FindFirstChild("HumanoidRootPart")
-
-    if not humanoid or not targetRoot then
-        return
-    end
-
-    local highlight
-
-    if Config.ESPHighlight then
-        highlight = Instance.new("Highlight")
+    if not data.Highlight then
+        local highlight = Instance.new("Highlight")
         highlight.Name = "DexiESP"
         highlight.FillColor = Theme.Accent
         highlight.OutlineColor = Theme.Accent2
         highlight.FillTransparency = 0.65
         highlight.OutlineTransparency = 0
-        highlight.DepthMode =
-            Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Adornee = character
         highlight.Parent = character
+        data.Highlight = highlight
     end
 
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "DexiInfo"
-    billboard.Size = UDim2.fromOffset(160, 55)
-    billboard.StudsOffset = Vector3.new(0, 3.3, 0)
-    billboard.AlwaysOnTop = true
-    billboard.MaxDistance = Config.ESPMaxDistance
-    billboard.Parent = character
+    local anchor = GetESPAnchor(character)
 
-    local info = Instance.new("TextLabel")
-    info.Name = "Info"
-    info.Size = UDim2.fromScale(1, 1)
-    info.BackgroundTransparency = 1
-    info.TextColor3 = Theme.Text
-    info.TextStrokeTransparency = 0.2
-    info.Font = Enum.Font.GothamBold
-    info.TextSize = 9
-    info.TextWrapped = true
-    info.Parent = billboard
+    if anchor and not data.Billboard then
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "DexiInfo"
+        billboard.Size = UDim2.fromOffset(160, 55)
+        billboard.StudsOffset = Vector3.new(0, 3.3, 0)
+        billboard.AlwaysOnTop = true
+        billboard.MaxDistance = Config.ESPMaxDistance
+        billboard.Adornee = anchor
+        billboard.Parent = anchor
 
-    ESP[player] = {
-        Highlight = highlight,
-        Billboard = billboard,
-        Info = info,
-    }
+        local info = Instance.new("TextLabel")
+        info.Name = "Info"
+        info.Size = UDim2.fromScale(1, 1)
+        info.BackgroundTransparency = 1
+        info.TextColor3 = Theme.Text
+        info.TextStrokeTransparency = 0.2
+        info.Font = Enum.Font.GothamBold
+        info.TextSize = 9
+        info.TextWrapped = true
+        info.Parent = billboard
+
+        data.Billboard = billboard
+        data.Info = info
+    elseif anchor and data.Billboard then
+        data.Billboard.Adornee = anchor
+        data.Billboard.Parent = anchor
+        data.Billboard.MaxDistance = Config.ESPMaxDistance
+    end
+
+    return data
+end
+
+local function RemoveESP(player)
+    local data = ESP[player]
+
+    if data then
+        if data.CharacterConnection then
+            data.CharacterConnection:Disconnect()
+            data.CharacterConnection = nil
+        end
+        DestroyESPObjects(data)
+        ESP[player] = nil
+    end
+end
+
+local function UpdateESPPlayer(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    local character = player.Character
+
+    if not character then
+        return
+    end
+
+    local data = EnsureESPObjects(player, character)
+
+    if not data then
+        return
+    end
+
+    local teamBlocked =
+        Config.ESPTeamCheck
+        and LocalPlayer.Team
+        and player.Team == LocalPlayer.Team
+
+    -- Highlight stays active for the entire lifetime of the character.
+    -- Distance only affects the text/tracer layer, so distant players
+    -- remain visibly highlighted as requested.
+    if data.Highlight then
+        data.Highlight.Enabled =
+            Config.ESP
+            and not teamBlocked
+    end
+
+    local targetRoot =
+        character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChildWhichIsA("BasePart")
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    if not targetRoot or not Root then
+        if data.Info then
+            data.Info.Visible = false
+        end
+        return
+    end
+
+    local distance =
+        (Root.Position - targetRoot.Position).Magnitude
+
+    local inRange = distance <= Config.ESPMaxDistance
+
+    if data.Info then
+        local lines = {}
+
+        if Config.ESPNames then
+            table.insert(lines, player.DisplayName)
+        end
+
+        if Config.ESPDistance then
+            table.insert(lines, math.floor(distance) .. " studs")
+        end
+
+        if Config.ESPHealth and humanoid then
+            table.insert(
+                lines,
+                "HP " ..
+                math.floor(humanoid.Health) ..
+                "/" ..
+                math.floor(humanoid.MaxHealth)
+            )
+        end
+
+        data.Info.Text = table.concat(lines, "\n")
+        data.Info.Visible =
+            Config.ESP
+            and not teamBlocked
+            and inRange
+
+        if data.Billboard then
+            data.Billboard.MaxDistance = Config.ESPMaxDistance
+        end
+    end
 end
 
 local function UpdateESP()
     if not Config.ESP then
         for player in pairs(ESP) do
-            RemoveESP(player)
+            local data = ESP[player]
+            if data then
+                if data.Highlight then
+                    data.Highlight.Enabled = false
+                end
+                if data.Info then
+                    data.Info.Visible = false
+                end
+            end
         end
-
         return
     end
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            if not ESP[player] then
-                CreateESP(player)
-            end
-
-            local data = ESP[player]
-
-            if data and player.Character and Root then
-                local targetRoot =
-                    player.Character:FindFirstChild(
-                        "HumanoidRootPart"
-                    )
-
-                local humanoid =
-                    player.Character:FindFirstChildOfClass(
-                        "Humanoid"
-                    )
-
-                if targetRoot and humanoid then
-                    local distance =
-                        (
-                            Root.Position -
-                            targetRoot.Position
-                        ).Magnitude
-
-                    local lines = {}
-
-                    if Config.ESPNames then
-                        table.insert(
-                            lines,
-                            player.DisplayName
-                        )
-                    end
-
-                    if Config.ESPDistance then
-                        table.insert(
-                            lines,
-                            math.floor(distance) ..
-                            " studs"
-                        )
-                    end
-
-                    if Config.ESPHealth then
-                        table.insert(
-                            lines,
-                            "HP " ..
-                            math.floor(humanoid.Health) ..
-                            "/" ..
-                            math.floor(humanoid.MaxHealth)
-                        )
-                    end
-
-                    data.Info.Text =
-                        table.concat(lines, "\n")
-
-                    local visible =
-                        distance <=
-                        Config.ESPMaxDistance
-
-                    data.Info.Visible = visible
-
-                    if data.Highlight then
-                        data.Highlight.Enabled =
-                            visible
-                    end
-                end
-            end
+            UpdateESPPlayer(player)
         end
     end
 end
 
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function()
-        task.wait(0.2)
-        RemoveESP(player)
+local function BindESPPlayer(player)
+    if player == LocalPlayer then
+        return
+    end
+
+    local data = GetESPData(player)
+
+    if data.CharacterConnection then
+        data.CharacterConnection:Disconnect()
+        data.CharacterConnection = nil
+    end
+
+    data.CharacterConnection = player.CharacterAdded:Connect(function(character)
+        -- Rebuild immediately and retry after the character has finished
+        -- assembling its parts. This fixes ESP disappearing on respawn.
+        task.defer(function()
+            if not ESP[player] or player.Character ~= character then
+                return
+            end
+            EnsureESPObjects(player, character)
+        end)
+
+        task.delay(0.15, function()
+            if not ESP[player] or player.Character ~= character then
+                return
+            end
+            EnsureESPObjects(player, character)
+        end)
     end)
+
+    if player.Character then
+        EnsureESPObjects(player, player.Character)
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        BindESPPlayer(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    BindESPPlayer(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -5292,7 +5235,6 @@ local ActiveFeatureDefinitions = {
     {field = "LocalNight", label = "Local Night"},
     {field = "Crosshair", label = "Crosshair"},
     {field = "AimAssist", label = "Aim Assist"},
-    {field = "AutoFire", label = "Auto Fire"},
     {field = "ThirdPerson", label = "Third Person"},
     {field = "FreeCamera", label = "Free Camera"},
     {field = "OrbitCamera", label = "Orbit Camera"},
@@ -5494,10 +5436,7 @@ local function UpdateDebugInfo()
             IsValidTargetPlayer(SelectedTarget)
             and SelectedTarget.DisplayName
             or "None"
-        ) ..
-        "\n" ..
-        "AUTO FIRE   " ..
-        tostring(Config.AutoFire)
+        )
 end
 
 --============================================================
@@ -5557,7 +5496,6 @@ RunService.RenderStepped:Connect(function(dt)
     UpdateAirWalk()
     UpdateSpinBot(dt)
     UpdateAim()
-    UpdateAutoFire()
 
     if Config.TargetFling then
         if not IsValidTargetPlayer(SelectedTarget) then
