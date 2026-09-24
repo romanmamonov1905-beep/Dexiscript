@@ -15,7 +15,6 @@ local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
-local Stats = game:GetService("Stats")
 local Workspace = game:GetService("Workspace")
 local VirtualUser = game:GetService("VirtualUser")
 local TweenService = game:GetService("TweenService")
@@ -81,6 +80,12 @@ local Config = {
     TouchBoost = false,
     TouchBoostPower = 90,
 
+    TargetFling = false,
+    TargetFlingSpeed = 135,
+    TargetFlingPower = 180,
+    TouchFlingOther = false,
+    TouchFlingPower = 180,
+
     ClickTeleport = false,
     TeleportSafety = true,
 
@@ -115,6 +120,9 @@ local Config = {
     AimVisibleCheck = true,
     AimSticky = false,
 
+    AutoFire = false,
+    AutoFireDelay = 0.16,
+
     FOV = 70,
     ThirdPerson = false,
     CameraDistance = 10,
@@ -147,6 +155,10 @@ local Config = {
     Notifications = true,
     UIScale = 1,
     CompactMode = false,
+
+    AutoSaveProfile = false,
+    ConfirmDeleteProfile = true,
+    NotifyProfileChanges = true,
 }
 
 --============================================================
@@ -162,6 +174,10 @@ local Gui
 local UINotifications
 
 local CurrentTarget
+local SelectedTarget
+local LastAutoFire = 0
+local TouchFlingDebounce = false
+
 local ESP = {}
 local Tracers = {}
 
@@ -169,9 +185,6 @@ local FlyAttachment
 local FlyVelocity
 local FlyOrientation
 
-local SpinConnection
-local FreeCameraConnection
-local OrbitConnection
 
 local SavedCollision = {}
 local SavedTransparency = {}
@@ -197,9 +210,396 @@ local CapturingKeybind = nil
 -- the newly assigned action on the same InputBegan event.
 local CapturingGlobalKeybind = nil
 
+--============================================================
+-- CONFIG PROFILE MANAGER
+--============================================================
+
+local Profiles = {}
+local CurrentProfileName = "Default"
+local ConfigDirty = false
+
+local ProfileNameBox
+local ProfileSelectorButton
+local ProfileStatus
+local RefreshProfileUI
+local RefreshConfigUI
+
+local function DeepCopy(value, seen)
+    if typeof(value) ~= "table" then
+        return value
+    end
+
+    seen = seen or {}
+
+    if seen[value] then
+        return seen[value]
+    end
+
+    local copy = {}
+    seen[value] = copy
+
+    for key, child in pairs(value) do
+        copy[DeepCopy(key, seen)] = DeepCopy(child, seen)
+    end
+
+    return copy
+end
+
+local function CleanProfileName(value)
+    local name = tostring(value or "")
+    name = name:gsub("^%s+", "")
+    name = name:gsub("%s+$", "")
+    name = name:gsub("[%c]", "")
+
+    if name == "" then
+        return nil
+    end
+
+    return string.sub(name, 1, 24)
+end
+
+local function UniqueProfileName(value)
+    local base = CleanProfileName(value) or "Config"
+
+    if not Profiles[base] then
+        return base
+    end
+
+    local number = 2
+
+    while Profiles[base .. " " .. number] do
+        number += 1
+    end
+
+    return base .. " " .. number
+end
+
+local function SnapshotConfig()
+    return {
+        Config = DeepCopy(Config),
+        Keybinds = DeepCopy(Keybinds),
+        Waypoints = DeepCopy(Waypoints),
+    }
+end
+
+local function RefreshProfileCount()
+    local count = 0
+
+    for _ in pairs(Profiles) do
+        count += 1
+    end
+
+    return count
+end
+
+local function MarkConfigDirty()
+    ConfigDirty = true
+
+    if Config.AutoSaveProfile
+        and Profiles[CurrentProfileName]
+    then
+        Profiles[CurrentProfileName] =
+            SnapshotConfig()
+
+        ConfigDirty = false
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function ApplySnapshot(snapshot)
+    if not snapshot
+        or not snapshot.Config
+    then
+        return false
+    end
+
+    for key, value in pairs(snapshot.Config) do
+        Config[key] = DeepCopy(value)
+    end
+
+    for key in pairs(Keybinds) do
+        Keybinds[key] = nil
+    end
+
+    if snapshot.Keybinds then
+        for key, value in pairs(snapshot.Keybinds) do
+            Keybinds[key] = DeepCopy(value)
+        end
+    end
+
+    for key in pairs(Waypoints) do
+        Waypoints[key] = nil
+    end
+
+    if snapshot.Waypoints then
+        for key, value in pairs(snapshot.Waypoints) do
+            Waypoints[key] = DeepCopy(value)
+        end
+    end
+
+    ConfigDirty = false
+
+    if RefreshConfigUI then
+        RefreshConfigUI()
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+
+    return true
+end
+
+local function SaveCurrentProfile(silent)
+    Profiles[CurrentProfileName] =
+        SnapshotConfig()
+
+    ConfigDirty = false
+
+    if not silent
+        and Config.NotifyProfileChanges
+    then
+        Notify(
+            "Config",
+            "Saved: " .. CurrentProfileName,
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function CreateProfile(name)
+    local clean =
+        UniqueProfileName(name)
+
+    Profiles[clean] =
+        SnapshotConfig()
+
+    CurrentProfileName =
+        clean
+
+    ConfigDirty = false
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Created: " .. clean,
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function LoadProfile(name)
+    if not Profiles[name] then
+        Notify(
+            "Config",
+            "Profile not found.",
+            2
+        )
+        return false
+    end
+
+    CurrentProfileName = name
+
+    return ApplySnapshot(
+        Profiles[name]
+    )
+end
+
+local function RenameCurrentProfile(name)
+    local clean =
+        CleanProfileName(name)
+
+    if not clean then
+        Notify(
+            "Config",
+            "Enter a valid name.",
+            2
+        )
+        return
+    end
+
+    if clean == CurrentProfileName then
+        return
+    end
+
+    if Profiles[clean] then
+        Notify(
+            "Config",
+            "That profile already exists.",
+            2
+        )
+        return
+    end
+
+    Profiles[clean] =
+        Profiles[CurrentProfileName]
+
+    Profiles[CurrentProfileName] = nil
+
+    CurrentProfileName =
+        clean
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Renamed to: " .. clean,
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function DuplicateCurrentProfile(name)
+    local clean =
+        UniqueProfileName(
+            name
+            or (CurrentProfileName .. " Copy")
+        )
+
+    Profiles[clean] =
+        SnapshotConfig()
+
+    CurrentProfileName =
+        clean
+
+    ConfigDirty = false
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Duplicated as: " .. clean,
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function DeleteCurrentProfile()
+    if CurrentProfileName == "Default" then
+        Notify(
+            "Config",
+            "Default cannot be deleted.",
+            2
+        )
+        return
+    end
+
+    Profiles[CurrentProfileName] = nil
+
+    local names = {}
+
+    for name in pairs(Profiles) do
+        table.insert(names, name)
+    end
+
+    table.sort(names)
+
+    CurrentProfileName =
+        names[1]
+        or "Default"
+
+    if Profiles[CurrentProfileName] then
+        ApplySnapshot(
+            Profiles[CurrentProfileName]
+        )
+    else
+        Profiles.Default =
+            SnapshotConfig()
+
+        CurrentProfileName =
+            "Default"
+    end
+
+    ConfigDirty = false
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Deleted profile.",
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function ResetCurrentProfile()
+    if not Profiles.Default then
+        Profiles.Default =
+            SnapshotConfig()
+    end
+
+    ApplySnapshot(
+        Profiles.Default
+    )
+
+    Profiles[CurrentProfileName] =
+        SnapshotConfig()
+
+    ConfigDirty = false
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Reset current profile.",
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
+local function RestoreDefaultProfile()
+    if not Profiles.Default then
+        Profiles.Default =
+            SnapshotConfig()
+    end
+
+    CurrentProfileName =
+        "Default"
+
+    ApplySnapshot(
+        Profiles.Default
+    )
+
+    ConfigDirty = false
+
+    if Config.NotifyProfileChanges then
+        Notify(
+            "Config",
+            "Default restored.",
+            2
+        )
+    end
+
+    if RefreshProfileUI then
+        RefreshProfileUI()
+    end
+end
+
 local DefaultKeybinds = {
-    -- Intentionally empty.
-    -- Every feature starts with NO keybind.
+    -- Every feature starts unbound.
 }
 
 for featureId, keyCode in pairs(DefaultKeybinds) do
@@ -209,10 +609,6 @@ end
 --============================================================
 -- HELPERS
 --============================================================
-
-local function clampNumber(value, minimum, maximum)
-    return math.clamp(value, minimum, maximum)
-end
 
 local function safeUnit(vector)
     if vector.Magnitude > 0.0001 then
@@ -312,6 +708,8 @@ LocalPlayer.CharacterAdded:Connect(function(character)
     SetupCharacter(character)
     SavedCollision = {}
     SavedTransparency = {}
+
+    ConnectTargetTouchFling(character)
 end)
 
 --============================================================
@@ -848,6 +1246,7 @@ local function Toggle(page, text, getter, setter)
 
     button.MouseButton1Click:Connect(function()
         setter(not getter())
+        MarkConfigDirty()
         refresh(true)
     end)
 
@@ -970,6 +1369,7 @@ local function Slider(page, text, minValue, maxValue, value, callback)
 
         refresh(newValue)
         callback(newValue)
+        MarkConfigDirty()
     end
 
     bar.InputBegan:Connect(function(input)
@@ -1051,6 +1451,7 @@ local function Dropdown(page, text, values, current, callback)
         end
 
         callback(values[index])
+        MarkConfigDirty()
         refresh()
     end)
 
@@ -1613,6 +2014,28 @@ Dropdown(
     end
 )
 
+Toggle(
+    AimPage,
+    "Auto Fire",
+    function()
+        return Config.AutoFire
+    end,
+    function(value)
+        Config.AutoFire = value
+    end
+)
+
+Slider(
+    AimPage,
+    "Auto Fire Delay",
+    0.05,
+    0.50,
+    Config.AutoFireDelay,
+    function(value)
+        Config.AutoFireDelay = value
+    end
+)
+
 local AimKeyButton = Button(
     AimPage,
     "[KEY]  Aim Key: -",
@@ -1648,11 +2071,67 @@ local AimKeyButton = Button(
                     "[KEY]  Aim Key: " ..
                     (Config.AimKey and Config.AimKey.Name or "-")
 
+                MarkConfigDirty()
                 connection:Disconnect()
             end
         end)
     end
 )
+
+--============================================================
+-- AUTO FIRE / TRIGGERBOT
+--============================================================
+
+local function GetEquippedTool()
+    if not Character then
+        return nil
+    end
+
+    return Character:FindFirstChildOfClass("Tool")
+end
+
+local function UpdateAutoFire()
+    if not Config.AutoFire then
+        return
+    end
+
+    -- Auto Fire follows the active Aim Assist target.
+    if not Config.AimAssist then
+        return
+    end
+
+    if not CurrentTarget then
+        return
+    end
+
+    if not IsValidTargetPlayer(CurrentTarget) then
+        CurrentTarget = nil
+        return
+    end
+
+    local tool = GetEquippedTool()
+
+    if not tool then
+        return
+    end
+
+    local now = os.clock()
+
+    if now - LastAutoFire <
+        Config.AutoFireDelay
+    then
+        return
+    end
+
+    -- Tool:Activate() is the local Tool activation API.
+    -- Actual shooting/damage depends on how the experience's
+    -- Tool is implemented; this does not call a server remote.
+    pcall(function()
+        tool:Activate()
+    end)
+
+    LastAutoFire = now
+end
 
 --============================================================
 -- CAMERA
@@ -1893,6 +2372,8 @@ for index = 1, 5 do
     Button(PlayerPage, "[SAVE]  Save Waypoint " .. index, function()
         if Root then
             Waypoints[index] = Root.CFrame
+            MarkConfigDirty()
+
             Notify(
                 "Waypoint",
                 "Saved waypoint " .. index
@@ -1916,6 +2397,258 @@ for index = 1, 5 do
     end)
 end
 
+--============================================================
+-- TARGET SELECTION / LOCAL TARGET PHYSICS
+--============================================================
+
+local function GetPlayerList()
+    local list = {}
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(list, player)
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return a.DisplayName:lower() < b.DisplayName:lower()
+    end)
+
+    return list
+end
+
+local function IsValidTargetPlayer(player)
+    if not player or player == LocalPlayer then
+        return false
+    end
+
+    local character = player.Character
+    local humanoid =
+        character
+        and character:FindFirstChildOfClass("Humanoid")
+
+    local targetRoot =
+        character
+        and character:FindFirstChild("HumanoidRootPart")
+
+    return
+        character ~= nil
+        and humanoid ~= nil
+        and humanoid.Health > 0
+        and targetRoot ~= nil
+end
+
+local function SelectNextTarget()
+    local list = GetPlayerList()
+
+    if #list == 0 then
+        SelectedTarget = nil
+        return nil
+    end
+
+    local currentIndex = 0
+
+    if SelectedTarget then
+        for index, player in ipairs(list) do
+            if player == SelectedTarget then
+                currentIndex = index
+                break
+            end
+        end
+    end
+
+    currentIndex += 1
+
+    if currentIndex > #list then
+        currentIndex = 1
+    end
+
+    SelectedTarget = list[currentIndex]
+
+    return SelectedTarget
+end
+
+local function SelectedTargetText()
+    if IsValidTargetPlayer(SelectedTarget) then
+        return SelectedTarget.DisplayName
+            .. " ["
+            .. SelectedTarget.Name
+            .. "]"
+    end
+
+    return "No target selected"
+end
+
+local function LocalTargetFling()
+    -- A LocalScript cannot reliably take ownership of another
+    -- player's character. This routine therefore uses local
+    -- character physics to ram the selected target. Whether the
+    -- target actually receives the impulse depends on the game's
+    -- physics ownership/network setup.
+    if not isAlive() then
+        return
+    end
+
+    if not IsValidTargetPlayer(SelectedTarget) then
+        Notify(
+            "Target Fling",
+            "Select a valid player first.",
+            3
+        )
+        return
+    end
+
+    local targetCharacter = SelectedTarget.Character
+    local targetRoot =
+        targetCharacter:FindFirstChild("HumanoidRootPart")
+
+    if not targetRoot then
+        return
+    end
+
+    local delta =
+        targetRoot.Position -
+        Root.Position
+
+    local direction =
+        safeUnit(delta)
+
+    if direction.Magnitude <= 0 then
+        return
+    end
+
+    -- Local ram.
+    Root.AssemblyLinearVelocity =
+        (
+            direction *
+            Config.TargetFlingSpeed
+        )
+        +
+        Vector3.new(
+            0,
+            Config.TargetFlingPower * 0.35,
+            0
+        )
+
+    Root.AssemblyAngularVelocity =
+        Vector3.new(
+            0,
+            Config.TargetFlingPower,
+            0
+        )
+
+    -- Best-effort local impulse if the target assembly is
+    -- currently client-simulatable. This may be ignored by Roblox
+    -- when the server owns the target assembly.
+    pcall(function()
+        targetRoot:ApplyImpulse(
+            direction *
+            targetRoot.AssemblyMass *
+            Config.TargetFlingPower
+        )
+    end)
+end
+
+local function LocalTouchFlingTarget(targetPlayer)
+    if not Config.TouchFlingOther then
+        return
+    end
+
+    if TouchFlingDebounce then
+        return
+    end
+
+    if not IsValidTargetPlayer(targetPlayer) then
+        return
+    end
+
+    if not Root then
+        return
+    end
+
+    TouchFlingDebounce = true
+
+    local targetRoot =
+        targetPlayer.Character:
+        FindFirstChild("HumanoidRootPart")
+
+    if targetRoot then
+        local direction =
+            safeUnit(
+                targetRoot.Position -
+                Root.Position
+            )
+
+        if direction.Magnitude > 0 then
+            Root.AssemblyLinearVelocity =
+                (
+                    direction *
+                    Config.TouchFlingPower *
+                    -1
+                )
+                +
+                Vector3.new(
+                    0,
+                    Config.TouchFlingPower * 0.25,
+                    0
+                )
+
+            pcall(function()
+                targetRoot:ApplyImpulse(
+                    direction *
+                    targetRoot.AssemblyMass *
+                    Config.TouchFlingPower
+                )
+            end)
+        end
+    end
+
+    task.delay(0.25, function()
+        TouchFlingDebounce = false
+    end)
+end
+
+local function ConnectTargetTouchFling(character)
+    if not character then
+        return
+    end
+
+    for _, object in ipairs(character:GetDescendants()) do
+        if object:IsA("BasePart") then
+            object.Touched:Connect(function(hit)
+                if not Config.TouchFlingOther then
+                    return
+                end
+
+                local otherCharacter =
+                    hit and hit:FindFirstAncestorOfClass("Model")
+
+                if not otherCharacter then
+                    return
+                end
+
+                local otherHumanoid =
+                    otherCharacter:
+                    FindFirstChildOfClass("Humanoid")
+
+                if not otherHumanoid then
+                    return
+                end
+
+                local player =
+                    Players:GetPlayerFromCharacter(
+                        otherCharacter
+                    )
+
+                if player and player ~= LocalPlayer then
+                    LocalTouchFlingTarget(player)
+                end
+            end)
+        end
+    end
+end
+
+--============================================================
 --============================================================
 -- PHYSICS
 --============================================================
@@ -1991,20 +2724,131 @@ Slider(
 Button(PhysicsPage, "[SPIN]  One-Shot Spin", function()
     if Root then
         local body = Root.AssemblyAngularVelocity
+
         Root.AssemblyAngularVelocity =
-            body + Vector3.new(0, 30, 0)
+            body +
+            Vector3.new(0, 30, 0)
     end
 end)
 
-Button(PhysicsPage, "[FLING]  One-Shot Self Fling", function()
-    if Root then
-        local look = Camera.CFrame.LookVector
-        Root.AssemblyLinearVelocity =
-            (look * 100)
-            + Vector3.new(0, 90, 0)
-    end
-end)
+Button(
+    PhysicsPage,
+    "[FLING]  One-Shot Self Fling",
+    function()
+        if Root then
+            local look =
+                Camera.CFrame.LookVector
 
+            Root.AssemblyLinearVelocity =
+                (look * 100)
+                +
+                Vector3.new(0, 90, 0)
+        end
+    end
+)
+
+Section(
+    PhysicsPage,
+    "Target Fling"
+)
+
+local TargetButton
+
+TargetButton = Button(
+    PhysicsPage,
+    "[TARGET]  Select Player: No target selected",
+    function()
+        local target = SelectNextTarget()
+
+        TargetButton.Text =
+            "[TARGET]  Select Player: " ..
+            SelectedTargetText()
+
+        if target then
+            Notify(
+                "Target",
+                "Selected " ..
+                target.DisplayName,
+                2
+            )
+        end
+    end
+)
+
+Toggle(
+    PhysicsPage,
+    "Target Fling",
+    function()
+        return Config.TargetFling
+    end,
+    function(value)
+        Config.TargetFling = value
+
+        if value and not IsValidTargetPlayer(SelectedTarget) then
+            Config.TargetFling = false
+
+            Notify(
+                "Target Fling",
+                "Select a valid player first.",
+                3
+            )
+        end
+    end
+)
+
+Slider(
+    PhysicsPage,
+    "Target Fling Speed",
+    20,
+    300,
+    Config.TargetFlingSpeed,
+    function(value)
+        Config.TargetFlingSpeed = value
+    end
+)
+
+Slider(
+    PhysicsPage,
+    "Target Fling Power",
+    20,
+    400,
+    Config.TargetFlingPower,
+    function(value)
+        Config.TargetFlingPower = value
+    end
+)
+
+Toggle(
+    PhysicsPage,
+    "Touch Fling (Other)",
+    function()
+        return Config.TouchFlingOther
+    end,
+    function(value)
+        Config.TouchFlingOther = value
+    end
+)
+
+Slider(
+    PhysicsPage,
+    "Touch Fling Power",
+    20,
+    400,
+    Config.TouchFlingPower,
+    function(value)
+        Config.TouchFlingPower = value
+    end
+)
+
+Button(
+    PhysicsPage,
+    "[FLING]  One-Shot Target Fling",
+    function()
+        LocalTargetFling()
+    end
+)
+
+--============================================================
 --============================================================
 -- DEBUG
 --============================================================
@@ -2192,11 +3036,428 @@ Button(SettingsPage, "[RESET]  Reset Main Settings", function()
         Humanoid.JumpPower = Config.JumpPower
     end
 
+    MarkConfigDirty()
+
+    if RefreshConfigUI then
+        RefreshConfigUI()
+    end
+
     Notify(
         "Dexi",
         "Main settings reset."
     )
 end)
+
+--============================================================
+-- CONFIG PROFILES
+--============================================================
+
+Section(SettingsPage, "Config Profiles")
+
+ProfileStatus = InfoBox(
+    SettingsPage,
+    "PROFILE     Default"
+        .. "\nSTATE       Saved"
+        .. "\nPROFILES    1",
+    65
+)
+
+local ProfileNameHolder = Instance.new("Frame")
+ProfileNameHolder.Name = "ProfileName"
+ProfileNameHolder.Size = UDim2.new(1, -6, 0, 42)
+ProfileNameHolder.BackgroundColor3 = Theme.Card
+ProfileNameHolder.BorderSizePixel = 0
+ProfileNameHolder.LayoutOrder = orderFor(SettingsPage)
+ProfileNameHolder.Parent = SettingsPage
+
+local profileNameCorner = Instance.new("UICorner")
+profileNameCorner.CornerRadius = UDim.new(0, 7)
+profileNameCorner.Parent = ProfileNameHolder
+
+local profileNameLabel = Instance.new("TextLabel")
+profileNameLabel.BackgroundTransparency = 1
+profileNameLabel.Position = UDim2.fromOffset(10, 0)
+profileNameLabel.Size = UDim2.fromOffset(68, 42)
+profileNameLabel.Text = "NAME"
+profileNameLabel.TextColor3 = Theme.Muted
+profileNameLabel.Font = Enum.Font.GothamBold
+profileNameLabel.TextSize = 8
+profileNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+profileNameLabel.Parent = ProfileNameHolder
+
+ProfileNameBox = Instance.new("TextBox")
+ProfileNameBox.Name = "ProfileNameBox"
+ProfileNameBox.Position = UDim2.fromOffset(73, 6)
+ProfileNameBox.Size = UDim2.new(1, -82, 0, 30)
+ProfileNameBox.BackgroundColor3 = Theme.Background
+ProfileNameBox.BorderSizePixel = 0
+ProfileNameBox.ClearTextOnFocus = false
+ProfileNameBox.PlaceholderText = "Profile name..."
+ProfileNameBox.Text = "Default"
+ProfileNameBox.TextColor3 = Theme.Text
+ProfileNameBox.PlaceholderColor3 = Theme.Muted
+ProfileNameBox.Font = Enum.Font.GothamMedium
+ProfileNameBox.TextSize = 9
+ProfileNameBox.TextXAlignment = Enum.TextXAlignment.Left
+ProfileNameBox.Parent = ProfileNameHolder
+
+local profileTextCorner = Instance.new("UICorner")
+profileTextCorner.CornerRadius = UDim.new(0, 6)
+profileTextCorner.Parent = ProfileNameBox
+
+local profileTextPadding = Instance.new("UIPadding")
+profileTextPadding.PaddingLeft = UDim.new(0, 9)
+profileTextPadding.Parent = ProfileNameBox
+
+local ConfigGrid = Instance.new("Frame")
+ConfigGrid.Name = "ConfigGrid"
+ConfigGrid.Size = UDim2.new(1, -6, 0, 152)
+ConfigGrid.BackgroundTransparency = 1
+ConfigGrid.LayoutOrder = orderFor(SettingsPage)
+ConfigGrid.Parent = SettingsPage
+
+local ConfigGridLayout = Instance.new("UIGridLayout")
+ConfigGridLayout.CellSize = UDim2.new(0.5, -4, 0, 32)
+ConfigGridLayout.CellPadding = UDim2.fromOffset(8, 6)
+ConfigGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ConfigGridLayout.Parent = ConfigGrid
+
+local ConfigGridButtons = {}
+
+local function ConfigGridButton(text, callback, order)
+    local button = Instance.new("TextButton")
+    button.Name = "ConfigButton"
+    button.Size = UDim2.new(0.5, -4, 0, 32)
+    button.BackgroundColor3 = Theme.Card
+    button.BorderSizePixel = 0
+    button.Text = text
+    button.TextColor3 = Theme.Text
+    button.Font = Enum.Font.GothamMedium
+    button.TextSize = 8
+    button.AutoButtonColor = false
+    button.LayoutOrder = order
+    button.Parent = ConfigGrid
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 7)
+    corner.Parent = button
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(42, 28, 53)
+    stroke.Thickness = 1
+    stroke.Parent = button
+
+    button.MouseEnter:Connect(function()
+        TweenService:Create(
+            button,
+            TweenInfo.new(0.10),
+            {BackgroundColor3 = Theme.CardHover}
+        ):Play()
+    end)
+
+    button.MouseLeave:Connect(function()
+        TweenService:Create(
+            button,
+            TweenInfo.new(0.12),
+            {BackgroundColor3 = Theme.Card}
+        ):Play()
+    end)
+
+    button.MouseButton1Click:Connect(callback)
+
+    ConfigGridButtons[text] = button
+
+    return button
+end
+
+local function ProfileInputName()
+    return CleanProfileName(
+        ProfileNameBox.Text
+    )
+end
+
+local deleteConfirmUntil = 0
+
+ProfileSelectorButton = ConfigGridButton(
+    "[SELECT]  Default",
+    function()
+        local names = {}
+
+        for name in pairs(Profiles) do
+            table.insert(names, name)
+        end
+
+        table.sort(names)
+
+        if #names == 0 then
+            return
+        end
+
+        local currentIndex = 1
+
+        for index, name in ipairs(names) do
+            if name == CurrentProfileName then
+                currentIndex = index
+                break
+            end
+        end
+
+        currentIndex += 1
+
+        if currentIndex > #names then
+            currentIndex = 1
+        end
+
+        LoadProfile(
+            names[currentIndex]
+        )
+    end,
+    1
+)
+
+ConfigGridButton(
+    "[SAVE]  Save Current",
+    function()
+        SaveCurrentProfile()
+    end,
+    2
+)
+
+ConfigGridButton(
+    "[LOAD]  Load Name",
+    function()
+        local name =
+            ProfileInputName()
+
+        if not name then
+            Notify(
+                "Config",
+                "Enter a profile name.",
+                2
+            )
+            return
+        end
+
+        LoadProfile(name)
+    end,
+    3
+)
+
+ConfigGridButton(
+    "[NEW]  Create Profile",
+    function()
+        local name =
+            ProfileInputName()
+
+        CreateProfile(
+            name or "Config"
+        )
+    end,
+    4
+)
+
+ConfigGridButton(
+    "[RENAME]  Rename Current",
+    function()
+        RenameCurrentProfile(
+            ProfileNameBox.Text
+        )
+    end,
+    5
+)
+
+ConfigGridButton(
+    "[DUP]  Duplicate Current",
+    function()
+        local typed =
+            ProfileInputName()
+
+        local base =
+            typed
+            or (CurrentProfileName .. " Copy")
+
+        DuplicateCurrentProfile(base)
+    end,
+    6
+)
+
+local DeleteButton = ConfigGridButton(
+    "[DELETE]  Delete Current",
+    function()
+        if CurrentProfileName == "Default" then
+            Notify(
+                "Config",
+                "Default cannot be deleted.",
+                2
+            )
+            return
+        end
+
+        if not Config.ConfirmDeleteProfile then
+            DeleteCurrentProfile()
+            return
+        end
+
+        if os.clock() <= deleteConfirmUntil then
+            deleteConfirmUntil = 0
+            DeleteButton.Text =
+                "[DELETE]  Delete Current"
+
+            DeleteCurrentProfile()
+            return
+        end
+
+        deleteConfirmUntil =
+            os.clock() + 2.5
+
+        DeleteButton.Text =
+            "[DELETE]  Confirm Delete"
+
+        Notify(
+            "Config",
+            "Click Delete again to confirm.",
+            2
+        )
+
+        task.delay(2.6, function()
+            if DeleteButton
+                and DeleteButton.Parent
+                and os.clock() > deleteConfirmUntil
+            then
+                DeleteButton.Text =
+                    "[DELETE]  Delete Current"
+            end
+        end)
+    end,
+    7
+)
+
+ConfigGridButton(
+    "[RESET]  Reset Current",
+    function()
+        ResetCurrentProfile()
+    end,
+    8
+)
+
+Section(SettingsPage, "Config Behavior")
+
+Toggle(
+    SettingsPage,
+    "Auto Save Profile",
+    function()
+        return Config.AutoSaveProfile
+    end,
+    function(value)
+        Config.AutoSaveProfile = value
+
+        if value then
+            SaveCurrentProfile(true)
+        end
+    end
+)
+
+Toggle(
+    SettingsPage,
+    "Confirm Before Delete",
+    function()
+        return Config.ConfirmDeleteProfile
+    end,
+    function(value)
+        Config.ConfirmDeleteProfile = value
+    end
+)
+
+Toggle(
+    SettingsPage,
+    "Profile Notifications",
+    function()
+        return Config.NotifyProfileChanges
+    end,
+    function(value)
+        Config.NotifyProfileChanges = value
+    end
+)
+
+Button(
+    SettingsPage,
+    "[RESTORE]  Restore Built-in Default",
+    function()
+        RestoreDefaultProfile()
+    end
+)
+
+local function UpdateProfileUI()
+    local count =
+        RefreshProfileCount()
+
+    if ProfileStatus then
+        ProfileStatus.Text =
+            "PROFILE     " ..
+            CurrentProfileName ..
+            "\n" ..
+            "STATE       " ..
+            (ConfigDirty and "Unsaved" or "Saved") ..
+            "\n" ..
+            "PROFILES    " ..
+            tostring(count)
+    end
+
+    if ProfileNameBox then
+        ProfileNameBox.Text =
+            CurrentProfileName
+    end
+
+    if ProfileSelectorButton then
+        ProfileSelectorButton.Text =
+            "[SELECT]  " ..
+            CurrentProfileName
+    end
+
+    if ConfigGridButtons["[RESET]  Reset Current"] then
+        ConfigGridButtons["[RESET]  Reset Current"].Text =
+            "[RESET]  Reset Current"
+    end
+end
+
+RefreshProfileUI = UpdateProfileUI
+
+RefreshConfigUI = function()
+    for _, controller in pairs(ToggleControllers) do
+        controller.Refresh(false)
+    end
+
+    if OpenKeyButton then
+        OpenKeyButton.Text =
+            "[KEY]  Open Key: " ..
+            (Config.OpenKey and Config.OpenKey.Name or "-")
+    end
+
+    if PanicKeyButton then
+        PanicKeyButton.Text =
+            "[PANIC]  Panic Key: " ..
+            (Config.PanicKey and Config.PanicKey.Name or "-")
+    end
+
+    if AimKeyButton then
+        AimKeyButton.Text =
+            "[KEY]  Aim Key: " ..
+            (Config.AimKey and Config.AimKey.Name or "-")
+    end
+
+    if UIScale then
+        UIScale.Scale =
+            Config.UIScale
+    end
+end
+
+-- Store a clean built-in snapshot only once.
+if not Profiles.Default then
+    Profiles.Default =
+        SnapshotConfig()
+end
+
+UpdateProfileUI()
 
 --============================================================
 -- CROSSHAIR
@@ -2953,29 +4214,6 @@ end
 
 local touchBoostDebounce = false
 
-local function DoSelfFling()
-    if not Root then
-        return
-    end
-
-    local direction =
-        safeUnit(
-            Camera.CFrame.LookVector
-        )
-
-    Root.AssemblyLinearVelocity =
-        (
-            direction *
-            Config.SelfFlingPower
-        )
-        +
-        Vector3.new(
-            0,
-            Config.SelfFlingPower * 0.65,
-            0
-        )
-end
-
 local function DoTouchBoost()
     if not Config.TouchBoost
         or not Root
@@ -3025,6 +4263,7 @@ local function ConnectTouchBoost()
 end
 
 ConnectTouchBoost()
+ConnectTargetTouchFling(Character)
 
 --============================================================
 -- INFINITE JUMP
@@ -3342,6 +4581,10 @@ end
 local function AimActive()
     if not Config.AimHold then
         return true
+    end
+
+    if not Config.AimKey then
+        return false
     end
 
     return UIS:IsKeyDown(
@@ -3722,6 +4965,7 @@ UIS.InputBegan:Connect(function(input, processed)
                 "OpenKey"
             then
                 Config.OpenKey = input.KeyCode
+                MarkConfigDirty()
 
                 OpenKeyButton.Text =
                     "[KEY]  Open Key: " ..
@@ -3735,6 +4979,7 @@ UIS.InputBegan:Connect(function(input, processed)
                 "PanicKey"
             then
                 Config.PanicKey = input.KeyCode
+                MarkConfigDirty()
 
                 PanicKeyButton.Text =
                     "[PANIC]  Panic Key: " ..
@@ -3814,6 +5059,7 @@ UIS.InputBegan:Connect(function(input, processed)
                 end
 
                 controller.Refresh(false)
+                MarkConfigDirty()
             end
 
             CapturingKeybind = nil
@@ -3878,6 +5124,8 @@ local ActiveFeatureDefinitions = {
     {field = "SpinBot", label = "Spin Bot"},
     {field = "SelfFling", label = "Self Fling"},
     {field = "TouchBoost", label = "Touch Boost"},
+    {field = "TargetFling", label = "Target Fling"},
+    {field = "TouchFlingOther", label = "Touch Fling Other"},
     {field = "ClickTeleport", label = "Click Teleport"},
     {field = "ESP", label = "ESP"},
     {field = "ESPHighlight", label = "ESP Highlight"},
@@ -3888,6 +5136,7 @@ local ActiveFeatureDefinitions = {
     {field = "LocalNight", label = "Local Night"},
     {field = "Crosshair", label = "Crosshair"},
     {field = "AimAssist", label = "Aim Assist"},
+    {field = "AutoFire", label = "Auto Fire"},
     {field = "ThirdPerson", label = "Third Person"},
     {field = "FreeCamera", label = "Free Camera"},
     {field = "OrbitCamera", label = "Orbit Camera"},
@@ -4082,7 +5331,17 @@ local function UpdateDebugInfo()
         tostring(Config.ESP) ..
         "\n" ..
         "AIM         " ..
-        tostring(Config.AimAssist)
+        tostring(Config.AimAssist) ..
+        "\n" ..
+        "TARGET      " ..
+        (
+            IsValidTargetPlayer(SelectedTarget)
+            and SelectedTarget.DisplayName
+            or "None"
+        ) ..
+        "\n" ..
+        "AUTO FIRE   " ..
+        tostring(Config.AutoFire)
 end
 
 --============================================================
@@ -4142,6 +5401,17 @@ RunService.RenderStepped:Connect(function(dt)
     UpdateAirWalk()
     UpdateSpinBot(dt)
     UpdateAim()
+    UpdateAutoFire()
+
+    if Config.TargetFling then
+        if not IsValidTargetPlayer(SelectedTarget) then
+            Config.TargetFling = false
+        else
+            -- Repeated local ram while Target Fling is enabled.
+            LocalTargetFling()
+        end
+    end
+
     UpdateWorld()
     UpdateLocalInvisible()
     UpdateCrosshair()
@@ -4247,6 +5517,8 @@ local FeatureCatalog = {
     "Aim: Max Distance",
     "Aim: Target Part",
     "Aim: Custom Aim Key",
+    "Aim: Auto Fire",
+    "Aim: Auto Fire Delay",
 
     "Camera: FOV",
     "Camera: Third Person",
@@ -4274,8 +5546,15 @@ local FeatureCatalog = {
     "Physics: Self Fling Power",
     "Physics: Touch Boost Self",
     "Physics: Touch Boost Power",
+    "Physics: Target Selector",
+    "Physics: Target Fling",
+    "Physics: Target Fling Speed",
+    "Physics: Target Fling Power",
+    "Physics: Touch Fling Other",
+    "Physics: Touch Fling Power",
     "Physics: One-Shot Spin",
     "Physics: One-Shot Self Fling",
+    "Physics: One-Shot Target Fling",
 
     "Debug: FPS",
     "Debug: Ping",
