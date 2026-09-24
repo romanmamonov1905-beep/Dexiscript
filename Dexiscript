@@ -177,6 +177,11 @@ local CurrentTarget
 local SelectedTarget
 local LastAutoFire = 0
 local TouchFlingDebounce = false
+local deleteConfirmUntil = 0
+
+-- Forward declarations used by the Auto Fire section above Aim helpers.
+local IsValidTargetPlayer
+local FindAimTarget
 
 local ESP = {}
 local Tracers = {}
@@ -219,7 +224,6 @@ local CurrentProfileName = "Default"
 local ConfigDirty = false
 
 local ProfileNameBox
-local ProfileSelectorButton
 local ProfileStatus
 local RefreshProfileUI
 local RefreshConfigUI
@@ -2090,24 +2094,93 @@ local function GetEquippedTool()
     return Character:FindFirstChildOfClass("Tool")
 end
 
-local function UpdateAutoFire()
-    if not Config.AutoFire then
-        return
-    end
-
-    -- Auto Fire follows the active Aim Assist target.
+local function GetAutoFireTarget()
     if not Config.AimAssist then
+        return nil
+    end
+
+    if CurrentTarget
+        and IsValidTargetPlayer(CurrentTarget)
+    then
+        return CurrentTarget
+    end
+
+    return FindAimTarget()
+end
+
+local function FireEquippedTool(tool)
+    if not tool or tool.Enabled == false then
+        return false
+    end
+
+    -- On touch devices, prefer an actual local tap-style input.
+    if UIS.TouchEnabled
+        and not UIS.MouseEnabled
+    then
+        local tapped = pcall(function()
+            VirtualUser:CaptureController()
+
+            local viewport = Camera.ViewportSize
+            local center = Vector2.new(
+                viewport.X / 2,
+                viewport.Y / 2
+            )
+
+            VirtualUser:ClickButton1(
+                center,
+                Camera.CFrame
+            )
+        end)
+
+        if tapped then
+            return true
+        end
+    end
+
+    -- Standard Tool activation for PC and for tools that expose
+    -- their shooting logic through Tool:Activate().
+    local activated = pcall(function()
+        tool:Activate()
+    end)
+
+    -- Last local-input fallback if Tool:Activate() is rejected.
+    if not activated then
+        pcall(function()
+            VirtualUser:CaptureController()
+
+            local viewport = Camera.ViewportSize
+            local center = Vector2.new(
+                viewport.X / 2,
+                viewport.Y / 2
+            )
+
+            VirtualUser:ClickButton1(
+                center,
+                Camera.CFrame
+            )
+        end)
+    end
+
+    return activated
+end
+
+local function UpdateAutoFire()
+    if not Config.AutoFire
+        or not Config.AimAssist
+    then
         return
     end
 
-    if not CurrentTarget then
-        return
-    end
+    local target = GetAutoFireTarget()
 
-    if not IsValidTargetPlayer(CurrentTarget) then
+    if not target
+        or not IsValidTargetPlayer(target)
+    then
         CurrentTarget = nil
         return
     end
+
+    CurrentTarget = target
 
     local tool = GetEquippedTool()
 
@@ -2123,13 +2196,7 @@ local function UpdateAutoFire()
         return
     end
 
-    -- Tool:Activate() is the local Tool activation API.
-    -- Actual shooting/damage depends on how the experience's
-    -- Tool is implemented; this does not call a server remote.
-    pcall(function()
-        tool:Activate()
-    end)
-
+    FireEquippedTool(tool)
     LastAutoFire = now
 end
 
@@ -2401,6 +2468,8 @@ end
 -- TARGET SELECTION / LOCAL TARGET PHYSICS
 --============================================================
 
+local TargetMenu
+
 local function GetPlayerList()
     local list = {}
 
@@ -2410,14 +2479,21 @@ local function GetPlayerList()
         end
     end
 
-    table.sort(list, function(a, b)
-        return a.DisplayName:lower() < b.DisplayName:lower()
+    table.sort(list, function(left, right)
+        local a = left.Name:lower()
+        local b = right.Name:lower()
+
+        if a == b then
+            return left.UserId < right.UserId
+        end
+
+        return a < b
     end)
 
     return list
 end
 
-local function IsValidTargetPlayer(player)
+IsValidTargetPlayer = function(player)
     if not player or player == LocalPlayer then
         return false
     end
@@ -2438,36 +2514,6 @@ local function IsValidTargetPlayer(player)
         and targetRoot ~= nil
 end
 
-local function SelectNextTarget()
-    local list = GetPlayerList()
-
-    if #list == 0 then
-        SelectedTarget = nil
-        return nil
-    end
-
-    local currentIndex = 0
-
-    if SelectedTarget then
-        for index, player in ipairs(list) do
-            if player == SelectedTarget then
-                currentIndex = index
-                break
-            end
-        end
-    end
-
-    currentIndex += 1
-
-    if currentIndex > #list then
-        currentIndex = 1
-    end
-
-    SelectedTarget = list[currentIndex]
-
-    return SelectedTarget
-end
-
 local function SelectedTargetText()
     if IsValidTargetPlayer(SelectedTarget) then
         return SelectedTarget.DisplayName
@@ -2480,11 +2526,6 @@ local function SelectedTargetText()
 end
 
 local function LocalTargetFling()
-    -- A LocalScript cannot reliably take ownership of another
-    -- player's character. This routine therefore uses local
-    -- character physics to ram the selected target. Whether the
-    -- target actually receives the impulse depends on the game's
-    -- physics ownership/network setup.
     if not isAlive() then
         return
     end
@@ -2506,18 +2547,16 @@ local function LocalTargetFling()
         return
     end
 
-    local delta =
-        targetRoot.Position -
-        Root.Position
-
     local direction =
-        safeUnit(delta)
+        safeUnit(
+            targetRoot.Position -
+            Root.Position
+        )
 
     if direction.Magnitude <= 0 then
         return
     end
 
-    -- Local ram.
     Root.AssemblyLinearVelocity =
         (
             direction *
@@ -2537,9 +2576,6 @@ local function LocalTargetFling()
             0
         )
 
-    -- Best-effort local impulse if the target assembly is
-    -- currently client-simulatable. This may be ignored by Roblox
-    -- when the server owns the target assembly.
     pcall(function()
         targetRoot:ApplyImpulse(
             direction *
@@ -2550,58 +2586,41 @@ local function LocalTargetFling()
 end
 
 local function LocalTouchFlingTarget(targetPlayer)
-    if not Config.TouchFlingOther then
+    if not Config.TouchFlingOther
+        or TouchFlingDebounce
+        or not IsValidTargetPlayer(targetPlayer)
+        or not Root
+    then
         return
     end
-
-    if TouchFlingDebounce then
-        return
-    end
-
-    if not IsValidTargetPlayer(targetPlayer) then
-        return
-    end
-
-    if not Root then
-        return
-    end
-
-    TouchFlingDebounce = true
 
     local targetRoot =
         targetPlayer.Character:
         FindFirstChild("HumanoidRootPart")
 
-    if targetRoot then
-        local direction =
-            safeUnit(
-                targetRoot.Position -
-                Root.Position
-            )
-
-        if direction.Magnitude > 0 then
-            Root.AssemblyLinearVelocity =
-                (
-                    direction *
-                    Config.TouchFlingPower *
-                    -1
-                )
-                +
-                Vector3.new(
-                    0,
-                    Config.TouchFlingPower * 0.25,
-                    0
-                )
-
-            pcall(function()
-                targetRoot:ApplyImpulse(
-                    direction *
-                    targetRoot.AssemblyMass *
-                    Config.TouchFlingPower
-                )
-            end)
-        end
+    if not targetRoot then
+        return
     end
+
+    TouchFlingDebounce = true
+
+    local direction =
+        safeUnit(
+            targetRoot.Position -
+            Root.Position
+        )
+
+    pcall(function()
+        Root.AssemblyLinearVelocity =
+            direction *
+            Config.TouchFlingPower
+
+        targetRoot:ApplyImpulse(
+            direction *
+            targetRoot.AssemblyMass *
+            Config.TouchFlingPower
+        )
+    end)
 
     task.delay(0.25, function()
         TouchFlingDebounce = false
@@ -2754,26 +2773,224 @@ Section(
 
 local TargetButton
 
-TargetButton = Button(
-    PhysicsPage,
-    "[TARGET]  Select Player: No target selected",
-    function()
-        local target = SelectNextTarget()
+local function RefreshTargetMenu()
+    if not TargetMenu then
+        return
+    end
 
-        TargetButton.Text =
-            "[TARGET]  Select Player: " ..
-            SelectedTargetText()
+    local list = TargetMenu:FindFirstChild("PlayerList")
+    if not list then
+        return
+    end
 
-        if target then
+    for _, child in ipairs(list:GetChildren()) do
+        if child:IsA("TextButton")
+            or child:IsA("TextLabel")
+        then
+            child:Destroy()
+        end
+    end
+
+    local players = GetPlayerList()
+
+    if #players == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -4, 0, 28)
+        empty.BackgroundTransparency = 1
+        empty.Text = "No other players"
+        empty.TextColor3 = Theme.Muted
+        empty.Font = Enum.Font.GothamMedium
+        empty.TextSize = 8
+        empty.ZIndex = 52
+        empty.Parent = list
+        return
+    end
+
+    for index, player in ipairs(players) do
+        local row = Instance.new("TextButton")
+        row.Size = UDim2.new(1, -4, 0, 28)
+        row.BackgroundColor3 = Theme.Card
+        row.BorderSizePixel = 0
+        row.AutoButtonColor = false
+        row.Text =
+            player.Name
+            .. "  ["
+            .. player.DisplayName
+            .. "]"
+        row.TextColor3 =
+            player == SelectedTarget
+            and Theme.Accent2
+            or Theme.Text
+        row.Font = Enum.Font.GothamMedium
+        row.TextSize = 8
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.LayoutOrder = index
+        row.ZIndex = 52
+        row.Parent = list
+
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8)
+        pad.Parent = row
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = row
+
+        row.MouseEnter:Connect(function()
+            row.BackgroundColor3 = Theme.CardHover
+        end)
+
+        row.MouseLeave:Connect(function()
+            row.BackgroundColor3 = Theme.Card
+        end)
+
+        row.MouseButton1Click:Connect(function()
+            SelectedTarget = player
+
+            TargetButton.Text =
+                "[TARGET]  " ..
+                SelectedTargetText()
+
+            TargetMenu.Visible = false
+
             Notify(
                 "Target",
-                "Selected " ..
-                target.DisplayName,
+                "Selected " .. player.Name,
                 2
             )
+        end)
+    end
+
+    local layout =
+        list:FindFirstChildOfClass("UIListLayout")
+
+    if layout then
+        list.CanvasSize = UDim2.fromOffset(
+            0,
+            layout.AbsoluteContentSize.Y + 5
+        )
+    end
+end
+
+local function CreateTargetMenu()
+    if TargetMenu then
+        return
+    end
+
+    TargetMenu = Instance.new("Frame")
+    TargetMenu.Name = "TargetMenu"
+    TargetMenu.Size = UDim2.fromOffset(280, 210)
+    TargetMenu.Position = UDim2.fromOffset(205, 150)
+    TargetMenu.BackgroundColor3 = Theme.Window
+    TargetMenu.BorderSizePixel = 0
+    TargetMenu.Visible = false
+    TargetMenu.ZIndex = 50
+    TargetMenu.Parent = Gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 9)
+    corner.Parent = TargetMenu
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Theme.AccentDark
+    stroke.Thickness = 1
+    stroke.Parent = TargetMenu
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.fromOffset(10, 6)
+    title.Size = UDim2.new(1, -80, 0, 20)
+    title.Text = "SELECT FLING TARGET"
+    title.TextColor3 = Theme.Accent2
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 9
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 51
+    title.Parent = TargetMenu
+
+    local refresh = Instance.new("TextButton")
+    refresh.Size = UDim2.fromOffset(65, 20)
+    refresh.Position = UDim2.new(1, -75, 0, 6)
+    refresh.BackgroundColor3 = Theme.Card
+    refresh.BorderSizePixel = 0
+    refresh.Text = "[REFRESH]"
+    refresh.TextColor3 = Theme.Text
+    refresh.Font = Enum.Font.GothamMedium
+    refresh.TextSize = 7
+    refresh.AutoButtonColor = false
+    refresh.ZIndex = 51
+    refresh.Parent = TargetMenu
+
+    local refreshCorner = Instance.new("UICorner")
+    refreshCorner.CornerRadius = UDim.new(0, 5)
+    refreshCorner.Parent = refresh
+
+    local list = Instance.new("ScrollingFrame")
+    list.Name = "PlayerList"
+    list.Position = UDim2.fromOffset(8, 31)
+    list.Size = UDim2.new(1, -16, 1, -39)
+    list.BackgroundTransparency = 1
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 3
+    list.ScrollBarImageColor3 = Theme.Accent
+    list.CanvasSize = UDim2.new()
+    list.ZIndex = 51
+    list.Parent = TargetMenu
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 5)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = list
+
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        list.CanvasSize = UDim2.fromOffset(
+            0,
+            layout.AbsoluteContentSize.Y + 5
+        )
+    end)
+
+    refresh.MouseButton1Click:Connect(
+        RefreshTargetMenu
+    )
+
+    Players.PlayerAdded:Connect(
+        function()
+            if TargetMenu.Visible then
+                RefreshTargetMenu()
+            end
+        end
+    )
+
+    Players.PlayerRemoving:Connect(
+        function(player)
+            if SelectedTarget == player then
+                SelectedTarget = nil
+                TargetButton.Text =
+                    "[TARGET]  No target selected"
+            end
+
+            if TargetMenu.Visible then
+                RefreshTargetMenu()
+            end
+        end
+    )
+end
+
+TargetButton = Button(
+    PhysicsPage,
+    "[TARGET]  No target selected",
+    function()
+        CreateTargetMenu()
+
+        TargetMenu.Visible =
+            not TargetMenu.Visible
+
+        if TargetMenu.Visible then
+            RefreshTargetMenu()
         end
     end
 )
+
 
 Toggle(
     PhysicsPage,
@@ -3059,40 +3276,39 @@ ProfileStatus = InfoBox(
     "PROFILE     Default"
         .. "\nSTATE       Saved"
         .. "\nPROFILES    1",
-    65
+    60
 )
 
 local ProfileNameHolder = Instance.new("Frame")
 ProfileNameHolder.Name = "ProfileName"
-ProfileNameHolder.Size = UDim2.new(1, -6, 0, 42)
+ProfileNameHolder.Size = UDim2.new(1, -6, 0, 38)
 ProfileNameHolder.BackgroundColor3 = Theme.Card
 ProfileNameHolder.BorderSizePixel = 0
 ProfileNameHolder.LayoutOrder = orderFor(SettingsPage)
 ProfileNameHolder.Parent = SettingsPage
 
-local profileNameCorner = Instance.new("UICorner")
-profileNameCorner.CornerRadius = UDim.new(0, 7)
-profileNameCorner.Parent = ProfileNameHolder
+local nameCorner = Instance.new("UICorner")
+nameCorner.CornerRadius = UDim.new(0, 7)
+nameCorner.Parent = ProfileNameHolder
 
-local profileNameLabel = Instance.new("TextLabel")
-profileNameLabel.BackgroundTransparency = 1
-profileNameLabel.Position = UDim2.fromOffset(10, 0)
-profileNameLabel.Size = UDim2.fromOffset(68, 42)
-profileNameLabel.Text = "NAME"
-profileNameLabel.TextColor3 = Theme.Muted
-profileNameLabel.Font = Enum.Font.GothamBold
-profileNameLabel.TextSize = 8
-profileNameLabel.TextXAlignment = Enum.TextXAlignment.Left
-profileNameLabel.Parent = ProfileNameHolder
+local nameLabel = Instance.new("TextLabel")
+nameLabel.BackgroundTransparency = 1
+nameLabel.Position = UDim2.fromOffset(10, 0)
+nameLabel.Size = UDim2.fromOffset(55, 38)
+nameLabel.Text = "NAME"
+nameLabel.TextColor3 = Theme.Muted
+nameLabel.Font = Enum.Font.GothamBold
+nameLabel.TextSize = 8
+nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+nameLabel.Parent = ProfileNameHolder
 
 ProfileNameBox = Instance.new("TextBox")
-ProfileNameBox.Name = "ProfileNameBox"
-ProfileNameBox.Position = UDim2.fromOffset(73, 6)
-ProfileNameBox.Size = UDim2.new(1, -82, 0, 30)
+ProfileNameBox.Position = UDim2.fromOffset(60, 5)
+ProfileNameBox.Size = UDim2.new(1, -68, 0, 28)
 ProfileNameBox.BackgroundColor3 = Theme.Background
 ProfileNameBox.BorderSizePixel = 0
 ProfileNameBox.ClearTextOnFocus = false
-ProfileNameBox.PlaceholderText = "Profile name..."
+ProfileNameBox.PlaceholderText = "Profile name"
 ProfileNameBox.Text = "Default"
 ProfileNameBox.TextColor3 = Theme.Text
 ProfileNameBox.PlaceholderColor3 = Theme.Muted
@@ -3101,17 +3317,17 @@ ProfileNameBox.TextSize = 9
 ProfileNameBox.TextXAlignment = Enum.TextXAlignment.Left
 ProfileNameBox.Parent = ProfileNameHolder
 
-local profileTextCorner = Instance.new("UICorner")
-profileTextCorner.CornerRadius = UDim.new(0, 6)
-profileTextCorner.Parent = ProfileNameBox
+local textCorner = Instance.new("UICorner")
+textCorner.CornerRadius = UDim.new(0, 6)
+textCorner.Parent = ProfileNameBox
 
-local profileTextPadding = Instance.new("UIPadding")
-profileTextPadding.PaddingLeft = UDim.new(0, 9)
-profileTextPadding.Parent = ProfileNameBox
+local textPadding = Instance.new("UIPadding")
+textPadding.PaddingLeft = UDim.new(0, 9)
+textPadding.Parent = ProfileNameBox
 
 local ConfigGrid = Instance.new("Frame")
 ConfigGrid.Name = "ConfigGrid"
-ConfigGrid.Size = UDim2.new(1, -6, 0, 152)
+ConfigGrid.Size = UDim2.new(1, -6, 0, 116)
 ConfigGrid.BackgroundTransparency = 1
 ConfigGrid.LayoutOrder = orderFor(SettingsPage)
 ConfigGrid.Parent = SettingsPage
@@ -3124,13 +3340,12 @@ ConfigGridLayout.Parent = ConfigGrid
 
 local ConfigGridButtons = {}
 
-local function ConfigGridButton(text, callback, order)
+local function ConfigGridButton(label, callback, order)
     local button = Instance.new("TextButton")
     button.Name = "ConfigButton"
-    button.Size = UDim2.new(0.5, -4, 0, 32)
     button.BackgroundColor3 = Theme.Card
     button.BorderSizePixel = 0
-    button.Text = text
+    button.Text = label
     button.TextColor3 = Theme.Text
     button.Font = Enum.Font.GothamMedium
     button.TextSize = 8
@@ -3165,58 +3380,46 @@ local function ConfigGridButton(text, callback, order)
 
     button.MouseButton1Click:Connect(callback)
 
-    ConfigGridButtons[text] = button
-
+    ConfigGridButtons[label] = button
     return button
 end
 
-local function ProfileInputName()
-    return CleanProfileName(
-        ProfileNameBox.Text
-    )
-end
+local ProfileSelectorButton =
+    ConfigGridButton(
+        "[SELECT]  Default",
+        function()
+            local names = {}
 
-local deleteConfirmUntil = 0
-
-ProfileSelectorButton = ConfigGridButton(
-    "[SELECT]  Default",
-    function()
-        local names = {}
-
-        for name in pairs(Profiles) do
-            table.insert(names, name)
-        end
-
-        table.sort(names)
-
-        if #names == 0 then
-            return
-        end
-
-        local currentIndex = 1
-
-        for index, name in ipairs(names) do
-            if name == CurrentProfileName then
-                currentIndex = index
-                break
+            for name in pairs(Profiles) do
+                table.insert(names, name)
             end
-        end
 
-        currentIndex += 1
+            table.sort(names)
 
-        if currentIndex > #names then
-            currentIndex = 1
-        end
+            if #names == 0 then
+                return
+            end
 
-        LoadProfile(
-            names[currentIndex]
-        )
-    end,
-    1
-)
+            local index = 1
+
+            for i, name in ipairs(names) do
+                if name == CurrentProfileName then
+                    index = i + 1
+                    break
+                end
+            end
+
+            if index > #names then
+                index = 1
+            end
+
+            LoadProfile(names[index])
+        end,
+        1
+    )
 
 ConfigGridButton(
-    "[SAVE]  Save Current",
+    "[SAVE]  Save",
     function()
         SaveCurrentProfile()
     end,
@@ -3224,120 +3427,77 @@ ConfigGridButton(
 )
 
 ConfigGridButton(
-    "[LOAD]  Load Name",
+    "[NEW]  Create",
     function()
-        local name =
-            ProfileInputName()
-
-        if not name then
-            Notify(
-                "Config",
-                "Enter a profile name.",
-                2
-            )
-            return
-        end
-
-        LoadProfile(name)
+        CreateProfile(ProfileNameBox.Text)
     end,
     3
 )
 
 ConfigGridButton(
-    "[NEW]  Create Profile",
+    "[RENAME]  Rename",
     function()
-        local name =
-            ProfileInputName()
-
-        CreateProfile(
-            name or "Config"
-        )
+        RenameCurrentProfile(ProfileNameBox.Text)
     end,
     4
 )
 
-ConfigGridButton(
-    "[RENAME]  Rename Current",
-    function()
-        RenameCurrentProfile(
-            ProfileNameBox.Text
-        )
-    end,
-    5
-)
+local DeleteButton =
+    ConfigGridButton(
+        "[DELETE]  Delete",
+        function()
+            if CurrentProfileName == "Default" then
+                Notify(
+                    "Config",
+                    "Default cannot be deleted.",
+                    2
+                )
+                return
+            end
 
-ConfigGridButton(
-    "[DUP]  Duplicate Current",
-    function()
-        local typed =
-            ProfileInputName()
+            if not Config.ConfirmDeleteProfile then
+                DeleteCurrentProfile()
+                return
+            end
 
-        local base =
-            typed
-            or (CurrentProfileName .. " Copy")
+            if os.clock() <= deleteConfirmUntil then
+                deleteConfirmUntil = 0
+                DeleteButton.Text =
+                    "[DELETE]  Delete"
 
-        DuplicateCurrentProfile(base)
-    end,
-    6
-)
+                DeleteCurrentProfile()
+                return
+            end
 
-local DeleteButton = ConfigGridButton(
-    "[DELETE]  Delete Current",
-    function()
-        if CurrentProfileName == "Default" then
+            deleteConfirmUntil = os.clock() + 2.5
+            DeleteButton.Text =
+                "[DELETE]  Confirm"
+
             Notify(
                 "Config",
-                "Default cannot be deleted.",
+                "Click Delete again.",
                 2
             )
-            return
-        end
 
-        if not Config.ConfirmDeleteProfile then
-            DeleteCurrentProfile()
-            return
-        end
-
-        if os.clock() <= deleteConfirmUntil then
-            deleteConfirmUntil = 0
-            DeleteButton.Text =
-                "[DELETE]  Delete Current"
-
-            DeleteCurrentProfile()
-            return
-        end
-
-        deleteConfirmUntil =
-            os.clock() + 2.5
-
-        DeleteButton.Text =
-            "[DELETE]  Confirm Delete"
-
-        Notify(
-            "Config",
-            "Click Delete again to confirm.",
-            2
-        )
-
-        task.delay(2.6, function()
-            if DeleteButton
-                and DeleteButton.Parent
-                and os.clock() > deleteConfirmUntil
-            then
-                DeleteButton.Text =
-                    "[DELETE]  Delete Current"
-            end
-        end)
-    end,
-    7
-)
+            task.delay(2.6, function()
+                if DeleteButton
+                    and DeleteButton.Parent
+                    and os.clock() > deleteConfirmUntil
+                then
+                    DeleteButton.Text =
+                        "[DELETE]  Delete"
+                end
+            end)
+        end,
+        5
+    )
 
 ConfigGridButton(
-    "[RESET]  Reset Current",
+    "[RESET]  Reset",
     function()
         ResetCurrentProfile()
     end,
-    8
+    6
 )
 
 Section(SettingsPage, "Config Behavior")
@@ -3368,20 +3528,9 @@ Toggle(
     end
 )
 
-Toggle(
-    SettingsPage,
-    "Profile Notifications",
-    function()
-        return Config.NotifyProfileChanges
-    end,
-    function(value)
-        Config.NotifyProfileChanges = value
-    end
-)
-
 Button(
     SettingsPage,
-    "[RESTORE]  Restore Built-in Default",
+    "[DEFAULT]  Restore Built-in Default",
     function()
         RestoreDefaultProfile()
     end
@@ -3393,30 +3542,36 @@ local function UpdateProfileUI()
 
     if ProfileStatus then
         ProfileStatus.Text =
-            "PROFILE     " ..
-            CurrentProfileName ..
-            "\n" ..
-            "STATE       " ..
-            (ConfigDirty and "Unsaved" or "Saved") ..
-            "\n" ..
-            "PROFILES    " ..
-            tostring(count)
+            "PROFILE     "
+            .. CurrentProfileName
+            .. "\nSTATE       "
+            .. (
+                ConfigDirty
+                and "Unsaved"
+                or "Saved"
+            )
+            .. "\nPROFILES    "
+            .. tostring(count)
     end
 
-    if ProfileNameBox then
+    if ProfileNameBox
+        and not ProfileNameBox:IsFocused()
+    then
         ProfileNameBox.Text =
             CurrentProfileName
     end
 
     if ProfileSelectorButton then
         ProfileSelectorButton.Text =
-            "[SELECT]  " ..
-            CurrentProfileName
+            "[SELECT]  "
+            .. CurrentProfileName
     end
 
-    if ConfigGridButtons["[RESET]  Reset Current"] then
-        ConfigGridButtons["[RESET]  Reset Current"].Text =
-            "[RESET]  Reset Current"
+    if DeleteButton then
+        DeleteButton.Text =
+            os.clock() <= deleteConfirmUntil
+            and "[DELETE]  Confirm"
+            or "[DELETE]  Delete"
     end
 end
 
@@ -4465,7 +4620,7 @@ local function IsVisible(character, part)
     )
 end
 
-local function FindAimTarget()
+FindAimTarget = function()
     if not Root then
         return nil
     end
@@ -4583,8 +4738,9 @@ local function AimActive()
         return true
     end
 
+    -- No assigned Aim Key means Aim Hold is effectively always active.
     if not Config.AimKey then
-        return false
+        return true
     end
 
     return UIS:IsKeyDown(
@@ -5461,114 +5617,3 @@ Notify(
     "Loaded successfully. RightShift opens the panel.",
     4
 )
-
---============================================================
--- SAFE EXTENSION CATALOG
---
--- The remainder of this file is intentionally documented so
--- the single-file build is easy to extend and maintain.
--- Each entry describes a LOCAL feature slot.  These are
--- documentation/configuration entries, not remote calls.
---============================================================
-
-local FeatureCatalog = {
-
-    "Movement: WalkSpeed",
-    "Movement: JumpPower",
-    "Movement: HipHeight",
-    "Movement: Fly",
-    "Movement: Fly Speed",
-    "Movement: Fly Vertical Speed",
-    "Movement: Fly Face Camera",
-    "Movement: Noclip",
-    "Movement: Infinite Jump",
-    "Movement: Bunny Hop",
-    "Movement: Auto Jump",
-    "Movement: Air Strafe",
-    "Movement: Air Walk",
-    "Movement: Glide",
-    "Movement: Hover",
-    "Movement: Click Teleport",
-
-    "Visuals: Player ESP",
-    "Visuals: ESP Highlight",
-    "Visuals: ESP Names",
-    "Visuals: ESP Distance",
-    "Visuals: ESP Health",
-    "Visuals: ESP Tracers",
-    "Visuals: ESP Team Check",
-    "Visuals: ESP Max Distance",
-    "Visuals: Fullbright",
-    "Visuals: Remove Fog",
-    "Visuals: Local Day",
-    "Visuals: Local Night",
-    "Visuals: Brightness",
-    "Visuals: Crosshair",
-    "Visuals: Crosshair Size",
-    "Visuals: Crosshair Gap",
-
-    "Aim: Aim Assist",
-    "Aim: Hold Activation",
-    "Aim: Sticky Target",
-    "Aim: Team Check",
-    "Aim: Visibility Check",
-    "Aim: Aim FOV",
-    "Aim: Smoothness",
-    "Aim: Max Distance",
-    "Aim: Target Part",
-    "Aim: Custom Aim Key",
-    "Aim: Auto Fire",
-    "Aim: Auto Fire Delay",
-
-    "Camera: FOV",
-    "Camera: Third Person",
-    "Camera: Camera Distance",
-    "Camera: Free Camera",
-    "Camera: Free Camera Speed",
-    "Camera: Free Camera Boost",
-    "Camera: Orbit Camera",
-    "Camera: Orbit Speed",
-
-    "Player: Anti-AFK",
-    "Player: Auto Rotate",
-    "Player: Platform Stand",
-    "Player: Sit",
-    "Player: Freeze Character",
-    "Player: Local Invisible",
-    "Player: Animation Speed",
-    "Player: Respawn",
-    "Player: Spawn Teleport",
-    "Player: Waypoints 1-5",
-
-    "Physics: Local Spin",
-    "Physics: Spin Speed",
-    "Physics: Self Fling",
-    "Physics: Self Fling Power",
-    "Physics: Touch Boost Self",
-    "Physics: Touch Boost Power",
-    "Physics: Target Selector",
-    "Physics: Target Fling",
-    "Physics: Target Fling Speed",
-    "Physics: Target Fling Power",
-    "Physics: Touch Fling Other",
-    "Physics: Touch Fling Power",
-    "Physics: One-Shot Spin",
-    "Physics: One-Shot Self Fling",
-    "Physics: One-Shot Target Fling",
-
-    "Debug: FPS",
-    "Debug: Ping",
-    "Debug: Position",
-    "Debug: Velocity",
-    "Debug: Humanoid State",
-    "Debug: Radar",
-    "Debug: Radar Range",
-
-    "Settings: Open Key",
-    "Settings: Panic Key",
-    "Settings: UI Scale",
-    "Settings: Notifications",
-    "Settings: Compact Mode",
-    "Settings: Hide Panel",
-    "Settings: Reset Settings",
-}
