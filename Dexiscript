@@ -247,6 +247,8 @@ Gui = nil
 UINotifications = nil
 
 CurrentTarget = nil
+RandomAimPartLock = nil
+RandomAimTargetPlayer = nil
 SelectedTarget = nil
 TouchFlingDebounce = false
 deleteConfirmUntil = 0
@@ -5574,102 +5576,52 @@ FindAimTarget = function()
         return nil
     end
 
-    local viewport =
-        Camera.ViewportSize
-
-    local center =
-        Vector2.new(
-            viewport.X / 2,
-            viewport.Y / 2
-        )
-
+    local viewport = Camera.ViewportSize
+    local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
     local closest
-    local closestDistance =
-        Config.AimFOV
+    local closestDistance = Config.AimFOV
 
-    for _, player in ipairs(
-        Players:GetPlayers()
-    ) do
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            if not (
-                Config.AimTeamCheck
-                and SameTeam(
-                    LocalPlayer,
-                    player
-                )
-            ) then
-                local character =
-                    player.Character
+            if not (Config.AimTeamCheck and SameTeam(LocalPlayer, player)) then
+                local character = player.Character
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                local root = character and character:FindFirstChild("HumanoidRootPart")
 
-                local humanoid =
-                    character
-                    and character:
-                        FindFirstChildOfClass(
-                            "Humanoid"
-                        )
+                if humanoid and humanoid.Health > 0 and root then
+                    -- For Random mode, acquire the player using a stable center point.
+                    -- The actual random body part is chosen once after the target is acquired.
+                    local acquirePart
+                    if Config.AimPart == "Random" then
+                        acquirePart = character:FindFirstChild("Head")
+                            or root
+                    else
+                        acquirePart = GetConfiguredAimPart(character, humanoid)
+                    end
 
-                local root =
-                    character
-                    and character:
-                        FindFirstChild(
-                            "HumanoidRootPart"
-                        )
+                    if acquirePart then
+                        local worldDistance =
+                            (Root.Position - root.Position).Magnitude
 
-                local part =
-                    character
-                    and GetConfiguredAimPart(
-                        character,
-                        humanoid
-                    )
+                        if worldDistance <= Config.AimMaxDistance then
+                            local point, onScreen =
+                                Camera:WorldToViewportPoint(acquirePart.Position)
 
-                if humanoid
-                    and humanoid.Health > 0
-                    and root
-                    and part
-                then
-                    local worldDistance =
-                        (
-                            Root.Position -
-                            root.Position
-                        ).Magnitude
+                            if onScreen then
+                                local screenDistance =
+                                    (Vector2.new(point.X, point.Y) - center).Magnitude
 
-                    if worldDistance <=
-                        Config.AimMaxDistance
-                    then
-                        local point, onScreen =
-                            Camera:
-                                WorldToViewportPoint(
-                                    part.Position
-                                )
-
-                        if onScreen then
-                            local screenDistance =
-                                (
-                                    Vector2.new(
-                                        point.X,
-                                        point.Y
-                                    ) -
-                                    center
-                                ).Magnitude
-
-                            if screenDistance <=
-                                closestDistance
-                            then
-                                if
-                                    not Config.AimVisibleCheck
-                                    or IsVisible(
-                                        character,
-                                        part
-                                    )
-                                then
-                                    closest = {
-                                        Player = player,
-                                        Character = character,
-                                        Part = part
-                                    }
-
-                                    closestDistance =
-                                        screenDistance
+                                if screenDistance <= closestDistance then
+                                    if not Config.AimVisibleCheck
+                                        or IsVisible(character, acquirePart)
+                                    then
+                                        closest = {
+                                            Player = player,
+                                            Character = character,
+                                            Part = acquirePart
+                                        }
+                                        closestDistance = screenDistance
+                                    end
                                 end
                             end
                         end
@@ -5698,46 +5650,65 @@ function AimActive()
 end
 
 function UpdateAim()
-    AimCircle.Visible =
-        Config.AimAssist
-
-    AimCircle.Size =
-        UDim2.fromOffset(
-            Config.AimFOV * 2,
-            Config.AimFOV * 2
-        )
+    AimCircle.Visible = Config.AimAssist
+    AimCircle.Size = UDim2.fromOffset(Config.AimFOV * 2, Config.AimFOV * 2)
 
     if not Config.AimAssist then
         CurrentTarget = nil
+        RandomAimPartLock = nil
+        RandomAimTargetPlayer = nil
         return
     end
 
-    if not AimActive() then
-        if not Config.AimSticky then
+    local aimActive = AimActive()
+
+    -- Releasing the aim key starts a fresh aim session.
+    -- This is the important part for Random: the next acquisition gets a new body part.
+    if not aimActive then
+        CurrentTarget = nil
+        RandomAimPartLock = nil
+        RandomAimTargetPlayer = nil
+        return
+    end
+
+    if not Config.AimSticky or not CurrentTarget then
+        local previousPlayer = CurrentTarget and CurrentTarget.Player
+        local foundTarget = FindAimTarget()
+
+        if not foundTarget then
             CurrentTarget = nil
+            RandomAimPartLock = nil
+            RandomAimTargetPlayer = nil
+            return
         end
 
-        return
-    end
+        -- A fresh aim session or a newly acquired target gets one random body part.
+        -- That part remains locked until the current aim/target lock ends.
+        if Config.AimPart == "Random" then
+            local targetChanged =
+                previousPlayer ~= foundTarget.Player
 
-    if not Config.AimSticky
-        or not CurrentTarget
-    then
-        local previousTarget = CurrentTarget
-        local foundTarget =
-            FindAimTarget()
+            if targetChanged
+                or RandomAimTargetPlayer ~= foundTarget.Player
+                or not RandomAimPartLock
+                or not RandomAimPartLock.Parent
+            then
+                local humanoid = foundTarget.Character
+                    and foundTarget.Character:FindFirstChildOfClass("Humanoid")
 
-        -- With Random, reroll the body part when the target changes,
-        -- but keep the chosen part stable while the same target remains
-        -- under the crosshair. This avoids visible aim jitter.
-        if Config.AimPart == "Random"
-            and previousTarget
-            and foundTarget
-            and previousTarget.Player == foundTarget.Player
-            and previousTarget.Part
-            and previousTarget.Part.Parent
-        then
-            foundTarget.Part = previousTarget.Part
+                RandomAimPartLock = GetRandomAimPart(
+                    foundTarget.Character,
+                    humanoid
+                )
+                RandomAimTargetPlayer = foundTarget.Player
+            end
+
+            foundTarget.Part =
+                RandomAimPartLock
+                or foundTarget.Part
+        else
+            RandomAimPartLock = nil
+            RandomAimTargetPlayer = nil
         end
 
         CurrentTarget = foundTarget
@@ -5747,31 +5718,28 @@ function UpdateAim()
         return
     end
 
-    local character =
-        CurrentTarget.Character
-
-    local part =
-        CurrentTarget.Part
+    local character = CurrentTarget.Character
+    local part = CurrentTarget.Part
 
     if not character
         or not part
         or not part.Parent
     then
         CurrentTarget = nil
+        RandomAimPartLock = nil
+        RandomAimTargetPlayer = nil
         return
     end
 
-    local desired =
-        CFrame.lookAt(
-            Camera.CFrame.Position,
-            part.Position
-        )
+    local desired = CFrame.lookAt(
+        Camera.CFrame.Position,
+        part.Position
+    )
 
-    Camera.CFrame =
-        Camera.CFrame:Lerp(
-            desired,
-            Config.AimSmoothness
-        )
+    Camera.CFrame = Camera.CFrame:Lerp(
+        desired,
+        Config.AimSmoothness
+    )
 end
 
 --============================================================
