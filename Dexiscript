@@ -142,6 +142,8 @@ Config = {
     RemoveParticles = false,
     RemoveTrails = false,
     DisablePostFX = false,
+    LocalSkybox = false,
+    SkyDecalId = "",
 
     Crosshair = false,
     CrosshairSize = 7,
@@ -285,6 +287,9 @@ FlyOrientation = nil
 
 SavedCollision = {}
 SavedTransparency = {}
+SkyboxForceRefresh = false
+SkyboxSavedOriginals = nil
+SkyboxLastId = ""
 
 Waypoints = {
     [1] = nil,
@@ -959,9 +964,25 @@ subtitle.TextSize = 8
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
 subtitle.Parent = TopBar
 
+collapse = Instance.new("TextButton")
+collapse.AnchorPoint = Vector2.new(1, 0.5)
+collapse.Position = UDim2.new(1, -39, 0.5, 0)
+collapse.Size = UDim2.fromOffset(25, 25)
+collapse.BackgroundColor3 = Color3.fromRGB(29, 21, 42)
+collapse.Text = "-"
+collapse.TextColor3 = Theme.Text
+collapse.Font = Enum.Font.GothamBold
+collapse.TextSize = 8
+collapse.BorderSizePixel = 0
+collapse.Parent = TopBar
+
+collapseCorner = Instance.new("UICorner")
+collapseCorner.CornerRadius = UDim.new(0, 7)
+collapseCorner.Parent = collapse
+
 status = Instance.new("TextLabel")
 status.AnchorPoint = Vector2.new(1, 0.5)
-status.Position = UDim2.new(1, -44, 0.5, 0)
+status.Position = UDim2.new(1, -69, 0.5, 0)
 status.Size = UDim2.fromOffset(60, 16)
 status.BackgroundTransparency = 1
 status.Text = "READY"
@@ -986,6 +1007,25 @@ close.Parent = TopBar
 closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 7)
 closeCorner.Parent = close
+
+collapsed = false
+expandedMainSize = Main.Size
+
+collapse.MouseButton1Click:Connect(function()
+    collapsed = not collapsed
+
+    if collapsed then
+        Sidebar.Visible = false
+        Content.Visible = false
+        Main.Size = UDim2.fromOffset(620, 49)
+        collapse.Text = "-"
+    else
+        Main.Size = expandedMainSize
+        Sidebar.Visible = true
+        Content.Visible = true
+        collapse.Text = "-"
+    end
+end)
 
 close.MouseButton1Click:Connect(function()
     Main.Visible = false
@@ -2051,6 +2091,75 @@ Slider(
         Config.LightingBrightness = value
     end
 )
+
+Section(VisualsPage, "Local Skybox")
+
+Toggle(
+    VisualsPage,
+    "Local Skybox",
+    function()
+        return Config.LocalSkybox
+    end,
+    function(value)
+        Config.LocalSkybox = value
+        MarkConfigDirty()
+        if not value then
+            SkyboxForceRefresh = true
+        end
+    end
+)
+
+SkyIdHolder = Instance.new("Frame")
+SkyIdHolder.Name = "SkyDecalId"
+SkyIdHolder.Size = UDim2.new(1, -6, 0, 38)
+SkyIdHolder.BackgroundColor3 = Theme.Card
+SkyIdHolder.BorderSizePixel = 0
+SkyIdHolder.LayoutOrder = orderFor(VisualsPage)
+SkyIdHolder.Parent = VisualsPage
+
+SkyIdCorner = Instance.new("UICorner")
+SkyIdCorner.CornerRadius = UDim.new(0, 7)
+SkyIdCorner.Parent = SkyIdHolder
+
+SkyIdLabel = Instance.new("TextLabel")
+SkyIdLabel.BackgroundTransparency = 1
+SkyIdLabel.Position = UDim2.fromOffset(10, 0)
+SkyIdLabel.Size = UDim2.fromOffset(72, 38)
+SkyIdLabel.Text = "DECAL ID"
+SkyIdLabel.TextColor3 = Theme.Muted
+SkyIdLabel.Font = Enum.Font.GothamBold
+SkyIdLabel.TextSize = 8
+SkyIdLabel.TextXAlignment = Enum.TextXAlignment.Left
+SkyIdLabel.Parent = SkyIdHolder
+
+SkyIdBox = Instance.new("TextBox")
+SkyIdBox.Position = UDim2.fromOffset(78, 5)
+SkyIdBox.Size = UDim2.new(1, -88, 0, 28)
+SkyIdBox.BackgroundColor3 = Theme.Background
+SkyIdBox.BorderSizePixel = 0
+SkyIdBox.ClearTextOnFocus = false
+SkyIdBox.PlaceholderText = "123456789 or rbxassetid://123456789"
+SkyIdBox.Text = Config.SkyDecalId
+SkyIdBox.TextColor3 = Theme.Text
+SkyIdBox.PlaceholderColor3 = Theme.Muted
+SkyIdBox.Font = Enum.Font.GothamMedium
+SkyIdBox.TextSize = 9
+SkyIdBox.TextXAlignment = Enum.TextXAlignment.Left
+SkyIdBox.Parent = SkyIdHolder
+
+SkyIdBoxCorner = Instance.new("UICorner")
+SkyIdBoxCorner.CornerRadius = UDim.new(0, 6)
+SkyIdBoxCorner.Parent = SkyIdBox
+
+SkyIdBoxPadding = Instance.new("UIPadding")
+SkyIdBoxPadding.PaddingLeft = UDim.new(0, 9)
+SkyIdBoxPadding.Parent = SkyIdBox
+
+SkyIdBox.FocusLost:Connect(function()
+    Config.SkyDecalId = SkyIdBox.Text
+    MarkConfigDirty()
+    SkyboxForceRefresh = true
+end)
 
 Toggle(
     VisualsPage,
@@ -4313,6 +4422,10 @@ RefreshConfigUI = function()
             (Config.AimKey and Config.AimKey.Name or "-")
     end
 
+    if SkyIdBox and not SkyIdBox:IsFocused() then
+        SkyIdBox.Text = Config.SkyDecalId or ""
+    end
+
     if UIScale then
         UIScale.Scale =
             Config.UIScale
@@ -5336,6 +5449,84 @@ function UpdateLocalInvisible()
 end
 
 --============================================================
+-- LOCAL SKYBOX
+--============================================================
+
+function NormalizeSkyId(value)
+    value = tostring(value or ""):gsub("%s+", "")
+
+    if value == "" then
+        return ""
+    end
+
+    if value:match("^rbxassetid://") then
+        return value
+    end
+
+    local numeric = value:match("^(%d+)$")
+    if numeric then
+        return "rbxassetid://" .. numeric
+    end
+
+    return value
+end
+
+function UpdateSkybox()
+    skyId = NormalizeSkyId(Config.SkyDecalId)
+    existingDexiSky = Lighting:FindFirstChild("DexiLocalSky")
+
+    if not Config.LocalSkybox or skyId == "" then
+        if existingDexiSky then
+            existingDexiSky:Destroy()
+        end
+
+        if SkyboxSavedOriginals then
+            for _, sky in ipairs(SkyboxSavedOriginals) do
+                if sky and not sky.Parent then
+                    sky.Parent = Lighting
+                end
+            end
+        end
+
+        SkyboxSavedOriginals = nil
+        SkyboxLastId = ""
+        SkyboxForceRefresh = false
+        return
+    end
+
+    if not SkyboxSavedOriginals then
+        SkyboxSavedOriginals = {}
+        for _, object in ipairs(Lighting:GetChildren()) do
+            if object:IsA("Sky") and object.Name ~= "DexiLocalSky" then
+                table.insert(SkyboxSavedOriginals, object)
+                object.Parent = nil
+            end
+        end
+    end
+
+    if existingDexiSky and SkyboxLastId == skyId and not SkyboxForceRefresh then
+        return
+    end
+
+    if existingDexiSky then
+        existingDexiSky:Destroy()
+    end
+
+    sky = Instance.new("Sky")
+    sky.Name = "DexiLocalSky"
+    sky.SkyboxBk = skyId
+    sky.SkyboxDn = skyId
+    sky.SkyboxFt = skyId
+    sky.SkyboxLf = skyId
+    sky.SkyboxRt = skyId
+    sky.SkyboxUp = skyId
+    sky.Parent = Lighting
+
+    SkyboxLastId = skyId
+    SkyboxForceRefresh = false
+end
+
+--============================================================
 -- FULLBRIGHT / WORLD
 --============================================================
 
@@ -5348,6 +5539,8 @@ originalLighting = {
 }
 
 function UpdateWorld()
+    pcall(UpdateSkybox)
+
     if Config.Fullbright then
         Lighting.Brightness =
             Config.LightingBrightness
@@ -5471,7 +5664,65 @@ function SameTeam(a, b)
         and a.Team == b.Team
 end
 
+function IsLocallyTransparent(part)
+    if not part or not part:IsA("BasePart") then
+        return false
+    end
+
+    return part.Transparency >= 0.99
+        or part.LocalTransparencyModifier >= 0.99
+end
+
+function HasLocalObstruction(character, worldPoint)
+    if not Camera then
+        return true
+    end
+
+    local obscuring =
+        Camera:GetPartsObscuringTarget(
+            {worldPoint},
+            {Character}
+        )
+
+    for _, blocker in ipairs(obscuring) do
+        if blocker
+            and blocker.Parent
+            and not blocker:IsDescendantOf(character)
+            and not IsLocallyTransparent(blocker)
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
 function IsVisible(character, part)
+    if not Camera
+        or not character
+        or not part
+        or not part:IsDescendantOf(character)
+    then
+        return false
+    end
+
+    -- First make sure the point is actually in the local camera view.
+    local point, onScreen =
+        Camera:WorldToViewportPoint(part.Position)
+
+    if not onScreen or point.Z <= 0 then
+        return false
+    end
+
+    -- Camera:GetPartsObscuringTarget is client-side and follows
+    -- what the local camera can see, which is more reliable for
+    -- wall checks than testing CanCollide alone.
+    if HasLocalObstruction(character, part.Position) then
+        return false
+    end
+
+    -- Fallback raycast for geometry that may not be returned by
+    -- the camera occlusion helper.
     local origin =
         Camera.CFrame.Position
 
@@ -5488,6 +5739,7 @@ function IsVisible(character, part)
         {Character}
 
     params.IgnoreWater = true
+    params.RespectCanCollide = false
 
     local result =
         Workspace:Raycast(
@@ -5500,9 +5752,40 @@ function IsVisible(character, part)
         return true
     end
 
-    return result.Instance:IsDescendantOf(
-        character
-    )
+    if result.Instance:IsDescendantOf(character) then
+        return true
+    end
+
+    if IsLocallyTransparent(result.Instance) then
+        return true
+    end
+
+    return false
+end
+
+function IsCharacterLocallyVisible(character)
+    if not character then
+        return false
+    end
+
+    local points = {
+        character:FindFirstChild("Head"),
+        character:FindFirstChild("HumanoidRootPart"),
+        character:FindFirstChild("UpperTorso"),
+        character:FindFirstChild("Torso"),
+        character:FindFirstChild("LowerTorso")
+    }
+
+    for _, part in ipairs(points) do
+        if part
+            and part:IsA("BasePart")
+            and IsVisible(character, part)
+        then
+            return true
+        end
+    end
+
+    return false
 end
 
 -- Pick a rig-valid random body part.
@@ -5563,6 +5846,64 @@ GetRandomAimPart = function(character, humanoid)
     return valid[math.random(1, #valid)]
 end
 
+GetRandomVisibleAimPart = function(character, humanoid)
+    if not character or not humanoid then
+        return nil
+    end
+
+    local candidates
+
+    if humanoid.RigType == Enum.HumanoidRigType.R6 then
+        candidates = {
+            "Head",
+            "HumanoidRootPart",
+            "Torso",
+            "Left Arm",
+            "Right Arm",
+            "Left Leg",
+            "Right Leg"
+        }
+    else
+        candidates = {
+            "Head",
+            "HumanoidRootPart",
+            "UpperTorso",
+            "LowerTorso",
+            "LeftUpperArm",
+            "LeftLowerArm",
+            "LeftHand",
+            "RightUpperArm",
+            "RightLowerArm",
+            "RightHand",
+            "LeftUpperLeg",
+            "LeftLowerLeg",
+            "LeftFoot",
+            "RightUpperLeg",
+            "RightLowerLeg",
+            "RightFoot"
+        }
+    end
+
+    local visible = {}
+
+    for _, name in ipairs(candidates) do
+        local part = character:FindFirstChild(name)
+
+        if part
+            and part:IsA("BasePart")
+            and IsVisible(character, part)
+        then
+            visible[#visible + 1] = part
+        end
+    end
+
+    if #visible == 0 then
+        return nil
+    end
+
+    return visible[math.random(1, #visible)]
+end
+
 GetConfiguredAimPart = function(character, humanoid)
     if Config.AimPart == "Random" then
         return GetRandomAimPart(character, humanoid)
@@ -5612,9 +5953,18 @@ FindAimTarget = function()
                                     (Vector2.new(point.X, point.Y) - center).Magnitude
 
                                 if screenDistance <= closestDistance then
-                                    if not Config.AimVisibleCheck
-                                        or IsVisible(character, acquirePart)
+                                    local locallyVisible =
+                                        not Config.AimVisibleCheck
+                                        or IsCharacterLocallyVisible(character)
+
+                                    if locallyVisible
+                                        and Config.AimPart ~= "Random"
                                     then
+                                        locallyVisible =
+                                            IsVisible(character, acquirePart)
+                                    end
+
+                                    if locallyVisible then
                                         closest = {
                                             Player = player,
                                             Character = character,
@@ -5696,10 +6046,17 @@ function UpdateAim()
                 local humanoid = foundTarget.Character
                     and foundTarget.Character:FindFirstChildOfClass("Humanoid")
 
-                RandomAimPartLock = GetRandomAimPart(
-                    foundTarget.Character,
-                    humanoid
-                )
+                if Config.AimVisibleCheck then
+                    RandomAimPartLock = GetRandomVisibleAimPart(
+                        foundTarget.Character,
+                        humanoid
+                    )
+                else
+                    RandomAimPartLock = GetRandomAimPart(
+                        foundTarget.Character,
+                        humanoid
+                    )
+                end
                 RandomAimTargetPlayer = foundTarget.Player
             end
 
@@ -5724,6 +6081,17 @@ function UpdateAim()
     if not character
         or not part
         or not part.Parent
+    then
+        CurrentTarget = nil
+        RandomAimPartLock = nil
+        RandomAimTargetPlayer = nil
+        return
+    end
+
+    -- Re-check local line-of-sight every update so Aim Assist
+    -- immediately drops a target when a wall/part blocks it.
+    if Config.AimVisibleCheck
+        and not IsVisible(character, part)
     then
         CurrentTarget = nil
         RandomAimPartLock = nil
