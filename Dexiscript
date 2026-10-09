@@ -23,6 +23,25 @@ PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 Camera = Workspace.CurrentCamera
 
 --============================================================
+-- PREVIOUS RUN / CONNECTIONS
+--============================================================
+
+-- A previous run of the script kept all of its connections and overrides
+-- alive after its GUI was destroyed, so both copies fought each other
+-- (and game skies it had stashed were lost). It is shut down first.
+if type(_G.DexiShutdown) == "function" then
+    pcall(_G.DexiShutdown)
+end
+
+-- Every long-lived connection is tracked so Shutdown can disconnect it.
+Connections = {}
+
+function Track(connection)
+    table.insert(Connections, connection)
+    return connection
+end
+
+--============================================================
 -- THEME
 --============================================================
 
@@ -54,8 +73,14 @@ Config = {
     OpenKey = Enum.KeyCode.RightShift,
     PanicKey = Enum.KeyCode.End,
 
+    -- WalkSpeed / JumpPower / HipHeight are only forced while their
+    -- "Custom" toggle is on (moving the slider turns it on). Before, the
+    -- script forced WalkSpeed 50 and JumpPower 100 the moment it loaded,
+    -- overwrote the game's own speed changes, and Panic never undid it.
     WalkSpeed = 50,
+    WalkSpeedOverride = false,
     JumpPower = 100,
+    JumpPowerOverride = false,
     HipHeight = 2,
     -- HipHeight is only forced after the slider is touched, so R6 rigs
     -- (default HipHeight 0) do not float 2 studs above the ground.
@@ -285,6 +310,8 @@ SelectedTarget = nil
 TouchFlingDebounce = false
 TouchBoostDebounce = false
 DeleteConfirmUntil = 0
+DeleteConfirmName = nil
+ShutdownDone = false
 
 ESP = {}
 Tracers = {}
@@ -335,7 +362,9 @@ end
 
 TargetButtons = {}
 HiddenPlayerCache = {}
-OtherCollisionCache = setmetatable({}, {__mode = "k"})
+-- Plain table like the other caches: with weak keys an entry could be
+-- collected while the part still existed, and its CanCollide was lost.
+OtherCollisionCache = {}
 XRayCache = {}
 LowGraphicsCache = {}
 MutedSounds = {}
@@ -357,6 +386,7 @@ CapturingKeybind = nil
 -- Capture state for Open / Panic / Aim keys. Handled before anything else
 -- so the key being assigned never triggers its new action on the same press.
 CapturingGlobalKeybind = nil
+GlobalCaptureToken = 0
 
 --============================================================
 -- HELPERS
@@ -411,7 +441,10 @@ end
 -- Property overrides that remember the original value and restore it exactly
 -- once when the feature is turned off. Without this the script overwrote the
 -- game's own lighting / camera / humanoid values every single frame.
-ManagedProps = setmetatable({}, {__mode = "k"})
+-- Strong keys: with weak keys an entry could be collected while the object
+-- still existed (e.g. an Atmosphere), so its original value was never
+-- restored. Empty entries are removed instead.
+ManagedProps = {}
 
 function SetManaged(object, property, active, value)
     if not object then
@@ -431,6 +464,9 @@ function SetManaged(object, property, active, value)
                 return object[property]
             end)
             if not ok then
+                if next(store) == nil then
+                    ManagedProps[object] = nil
+                end
                 return
             end
             store[property] = {Value = original}
@@ -444,6 +480,9 @@ function SetManaged(object, property, active, value)
     elseif store and store[property] ~= nil then
         local original = store[property].Value
         store[property] = nil
+        if next(store) == nil then
+            ManagedProps[object] = nil
+        end
         pcall(function()
             object[property] = original
         end)
@@ -652,6 +691,10 @@ function ApplySnapshot(snapshot)
         Config[key] = DeepCopy(value)
     end
 
+    -- nil values are not stored in a table, so a config without an Aim Key
+    -- used to keep whatever Aim Key was set before loading it.
+    Config.AimKey = snapshot.Config.AimKey
+
     for key in pairs(Keybinds) do
         Keybinds[key] = nil
     end
@@ -749,12 +792,19 @@ function DeleteCurrentProfile()
         return false
     end
 
-    if Config.ConfirmDeleteProfile and os.clock() > DeleteConfirmUntil then
+    -- The confirmation belongs to one config. Before, pressing DELETE on one
+    -- config and then on another within 3 seconds deleted the second one
+    -- without asking.
+    if Config.ConfirmDeleteProfile
+        and (os.clock() > DeleteConfirmUntil or DeleteConfirmName ~= CurrentProfileName)
+    then
         DeleteConfirmUntil = os.clock() + 3
+        DeleteConfirmName = CurrentProfileName
         Notify("Config", "Press DELETE again to remove '" .. CurrentProfileName .. "'.", 3)
         return false
     end
     DeleteConfirmUntil = 0
+    DeleteConfirmName = nil
 
     local removed = CurrentProfileName
     Profiles[removed] = nil
@@ -962,7 +1012,8 @@ function ApplyDeviceScale()
     elseif DeviceMode == "Tablet" then
         UIScale.Scale = math.clamp(math.min(Config.UIScale, fitScale), 0.70, 1)
     else
-        UIScale.Scale = Config.UIScale
+        -- Small PC windows shrink the panel too (it used to go off screen).
+        UIScale.Scale = math.clamp(math.min(Config.UIScale, fitScale), 0.60, 1.15)
     end
 end
 
@@ -1139,7 +1190,7 @@ TopBar.InputBegan:Connect(function(input)
     end
 end)
 
-UIS.InputChanged:Connect(function(input)
+Track(UIS.InputChanged:Connect(function(input)
     if not dragging then
         return
     end
@@ -1157,7 +1208,7 @@ UIS.InputChanged:Connect(function(input)
             dragOriginal.Y.Offset + delta.Y
         )
     end
-end)
+end))
 
 --============================================================
 -- SIDEBAR / PAGES
@@ -1320,12 +1371,20 @@ function ApplyCompactMode()
     end
 end
 
+-- Created in the Settings page; its text used to stay at the device that
+-- was detected when the script loaded.
+DeviceButton = nil
+
 function ApplyResponsiveLayout()
     DetectDevice()
     ApplyDeviceScale()
 
     StatusLabel.Text = DeviceMode
     StatusLabel.TextColor3 = (DeviceMode == "PC") and Theme.Green or Theme.Accent2
+
+    if DeviceButton then
+        DeviceButton.Text = "[DEVICE]  Current: " .. DeviceMode
+    end
 
     Sidebar.Visible = not collapsed
     Content.Visible = not collapsed
@@ -1358,10 +1417,10 @@ end
 
 HookCamera()
 
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+Track(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
     HookCamera()
     ApplyResponsiveLayout()
-end)
+end))
 
 --============================================================
 -- UI HELPERS
@@ -1650,6 +1709,20 @@ function ConfigToggle(page, text, key, onChange)
     )
 end
 
+-- Slider drags are handled by one shared pair of input connections below.
+-- Every slider used to add two UserInputService connections of its own
+-- (~200 in total) that were never disconnected.
+ActiveSlider = nil
+
+function EndSliderDrag()
+    if ActiveSlider then
+        -- The page does not scroll while a slider is dragged on touch screens
+        -- (before, dragging a slider on a phone also scrolled the page).
+        ActiveSlider.Page.ScrollingEnabled = true
+        ActiveSlider = nil
+    end
+end
+
 -- Slider bound to a Config field. Registered in ValueControllers so it is
 -- redrawn when a config is loaded or settings are reset (it was not before).
 function Slider(page, text, minValue, maxValue, configKey, callback, step)
@@ -1719,9 +1792,6 @@ function Slider(page, text, minValue, maxValue, configKey, callback, step)
 
     refresh(Config[configKey])
 
-    local sliderDragging = false
-    local activeInput = nil
-
     local function setFromX(x)
         local pct = math.clamp(
             (x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1),
@@ -1757,8 +1827,9 @@ function Slider(page, text, minValue, maxValue, configKey, callback, step)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch
         then
-            sliderDragging = true
-            activeInput = input
+            EndSliderDrag()
+            ActiveSlider = {Input = input, SetFromX = setFromX, Page = page}
+            page.ScrollingEnabled = false
             setFromX(input.Position.X)
         end
     end
@@ -1766,33 +1837,40 @@ function Slider(page, text, minValue, maxValue, configKey, callback, step)
     bar.InputBegan:Connect(beginDrag)
     touchTarget.InputBegan:Connect(beginDrag)
 
-    UIS.InputChanged:Connect(function(input)
-        if not sliderDragging then
-            return
-        end
-
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-            or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
-        then
-            setFromX(input.Position.X)
-        end
-    end)
-
-    UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch
-        then
-            sliderDragging = false
-            activeInput = nil
-        end
-    end)
-
     table.insert(ValueControllers, function()
         refresh(Config[configKey])
     end)
 
     return holder
 end
+
+Track(UIS.InputChanged:Connect(function(input)
+    local slider = ActiveSlider
+    if not slider then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or (input.UserInputType == Enum.UserInputType.Touch and input == slider.Input)
+    then
+        slider.SetFromX(input.Position.X)
+    end
+end))
+
+Track(UIS.InputEnded:Connect(function(input)
+    local slider = ActiveSlider
+    if not slider then
+        return
+    end
+
+    -- Only the finger that drags the slider ends it (lifting the thumb off
+    -- the movement joystick used to stop the slider drag too).
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or (input.UserInputType == Enum.UserInputType.Touch and input == slider.Input)
+    then
+        EndSliderDrag()
+    end
+end))
 
 -- Cycling dropdown bound to a Config field.
 function Dropdown(page, text, values, configKey, callback)
@@ -1923,6 +2001,8 @@ Button(HomePage, "[REJOIN]  Rejoin Server", RejoinServer)
 Section(HomePage, "Active Features")
 ActiveInfo = InfoBox(HomePage, "No features currently active.", 100)
 ActiveInfo.TextWrapped = true
+-- Grows with the list instead of cutting off long lists of features.
+ActiveInfo.AutomaticSize = Enum.AutomaticSize.Y
 
 --============================================================
 -- MOVEMENT
@@ -1930,11 +2010,28 @@ ActiveInfo.TextWrapped = true
 
 Section(MovementPage, "Core Movement")
 
-Slider(MovementPage, "WalkSpeed", 16, 150, "WalkSpeed")
-Slider(MovementPage, "JumpPower", 50, 200, "JumpPower")
-Slider(MovementPage, "HipHeight", 0, 8, "HipHeight", function()
-    Config.HipHeightOverride = true
-end)
+-- Moving a slider switches its "Custom" toggle on.
+function EnableOverride(key, featureId)
+    return function()
+        if not Config[key] then
+            Config[key] = true
+            local controller = ToggleControllers[featureId]
+            if controller then
+                controller.Refresh(true)
+            end
+        end
+    end
+end
+
+ConfigToggle(MovementPage, "Custom WalkSpeed", "WalkSpeedOverride")
+Slider(MovementPage, "WalkSpeed", 16, 150, "WalkSpeed",
+    EnableOverride("WalkSpeedOverride", "Movement::Custom WalkSpeed"))
+ConfigToggle(MovementPage, "Custom JumpPower", "JumpPowerOverride")
+Slider(MovementPage, "JumpPower", 50, 200, "JumpPower",
+    EnableOverride("JumpPowerOverride", "Movement::Custom JumpPower"))
+ConfigToggle(MovementPage, "Custom HipHeight", "HipHeightOverride")
+Slider(MovementPage, "HipHeight", 0, 8, "HipHeight",
+    EnableOverride("HipHeightOverride", "Movement::Custom HipHeight"))
 
 ConfigToggle(MovementPage, "Fly", "Fly")
 Slider(MovementPage, "Fly Speed", 20, 250, "FlySpeed")
@@ -2196,6 +2293,14 @@ Dropdown(
 )
 
 function BeginGlobalCapture(target, button, pressText)
+    -- Pressing the same button again cancels (Escape often never reaches
+    -- the script because it opens the Roblox menu).
+    if CapturingGlobalKeybind == target then
+        CapturingGlobalKeybind = nil
+        RefreshKeyButtons()
+        return
+    end
+
     if not UIS.KeyboardEnabled and not (target == "AimKey" and UIS.MouseEnabled) then
         Notify("Keybind", "No keyboard detected on this device.", 3)
         return
@@ -2213,10 +2318,20 @@ function BeginGlobalCapture(target, button, pressText)
     RefreshKeyButtons()
     button.Text = pressText
 
+    -- Times out like the feature keybinds, so it can never stay stuck.
+    GlobalCaptureToken += 1
+    local token = GlobalCaptureToken
+    task.delay(8, function()
+        if CapturingGlobalKeybind == target and GlobalCaptureToken == token then
+            CapturingGlobalKeybind = nil
+            RefreshKeyButtons()
+        end
+    end)
+
     if target == "AimKey" then
         Notify("Aim Key", "Press a key or right/middle mouse. Escape cancels, Backspace clears.", 3)
     else
-        Notify("Keybind", "Press a keyboard key. Escape cancels.", 3)
+        Notify("Keybind", "Press a keyboard key. Escape or clicking again cancels.", 3)
     end
 end
 
@@ -2286,7 +2401,7 @@ CharacterInfo = InfoBox(
     PlayerPage,
     "PLAYER      " .. LocalPlayer.Name
         .. "\nHEALTH      --"
-        .. "\nSPEED       " .. tostring(Config.WalkSpeed)
+        .. "\nSPEED       --"
         .. "\nPOSITION    --"
         .. "\nVELOCITY    --",
     145
@@ -2387,8 +2502,10 @@ function IsValidTargetPlayer(player)
     return humanoid ~= nil and humanoid.Health > 0 and targetRoot ~= nil
 end
 
+-- Shows the selected player while they are in the server. Before, picking
+-- a player who was dead or respawning showed "No target selected".
 function SelectedTargetText()
-    if IsValidTargetPlayer(SelectedTarget) then
+    if SelectedTarget and SelectedTarget ~= LocalPlayer and SelectedTarget.Parent == Players then
         return SelectedTarget.DisplayName .. " [" .. SelectedTarget.Name .. "]"
     end
     return "No target selected"
@@ -2472,6 +2589,21 @@ function DoTouchBoost()
     end)
 end
 
+-- The floor is touched over and over while walking, so Touch Boost used to
+-- launch the player every 0.25 s as soon as they moved.
+function IsFloorPart(hit)
+    if not Root or not Humanoid then
+        return false
+    end
+
+    local result = Workspace:Raycast(
+        Root.Position,
+        Vector3.new(0, -(Humanoid.HipHeight + 4), 0),
+        CharacterRaycastParams()
+    )
+    return result ~= nil and result.Instance == hit
+end
+
 function OnCharacterTouched(hit)
     if not hit or not hit.Parent then
         return
@@ -2480,7 +2612,7 @@ function OnCharacterTouched(hit)
         return
     end
 
-    if Config.TouchBoost then
+    if Config.TouchBoost and not IsFloorPart(hit) then
         DoTouchBoost()
     end
 
@@ -2634,7 +2766,8 @@ function CreateTargetMenu()
     menuTitle.BackgroundTransparency = 1
     menuTitle.Position = UDim2.fromOffset(10, 6)
     menuTitle.Size = UDim2.new(1, -80, 0, 20)
-    menuTitle.Text = "SELECT FLING TARGET"
+    -- The same target is used by Spectate / Follow / Teleport too.
+    menuTitle.Text = "SELECT TARGET"
     menuTitle.TextColor3 = Theme.Accent2
     menuTitle.Font = Enum.Font.GothamBold
     menuTitle.TextSize = 9
@@ -2682,17 +2815,17 @@ function CreateTargetMenu()
 
     refreshButton.MouseButton1Click:Connect(RefreshTargetMenu)
 
-    Players.PlayerAdded:Connect(function()
+    Track(Players.PlayerAdded:Connect(function()
         if TargetMenu.Visible then
             RefreshTargetMenu()
         end
-    end)
+    end))
 
-    Players.PlayerRemoving:Connect(function()
+    Track(Players.PlayerRemoving:Connect(function()
         if TargetMenu.Visible then
             task.defer(RefreshTargetMenu)
         end
-    end)
+    end))
 end
 
 function SetTargetButtonsText()
@@ -2715,7 +2848,7 @@ end)
 table.insert(TargetButtons, TargetButton)
 
 -- Clears the target even if the target menu was never opened.
-Players.PlayerRemoving:Connect(function(player)
+Track(Players.PlayerRemoving:Connect(function(player)
     if SelectedTarget == player then
         SelectedTarget = nil
         Config.SpectateTarget = false
@@ -2723,7 +2856,7 @@ Players.PlayerRemoving:Connect(function(player)
         SetTargetButtonsText()
         RefreshAllToggles(false)
     end
-end)
+end))
 
 ConfigToggle(PhysicsPage, "Target Fling", "TargetFling", function(value)
     if value and not IsValidTargetPlayer(SelectedTarget) then
@@ -2808,8 +2941,8 @@ end
 
 Section(SettingsPage, "Interface")
 
-Button(SettingsPage, "[DEVICE]  Current: " .. DeviceMode, function()
-    DetectDevice()
+DeviceButton = Button(SettingsPage, "[DEVICE]  Current: " .. DeviceMode, function()
+    ApplyResponsiveLayout()
     Notify("Device", "Detected: " .. DeviceMode, 2)
 end)
 
@@ -2829,6 +2962,10 @@ Button(SettingsPage, "[HIDE]  Hide Dexi", function()
     end
 end)
 
+Button(SettingsPage, "[UNLOAD]  Unload Dexi", function()
+    Shutdown()
+end)
+
 Button(SettingsPage, "[RESET]  Reset Main Settings", function()
     Config.WalkSpeed = 50
     Config.JumpPower = 100
@@ -2837,6 +2974,8 @@ Button(SettingsPage, "[RESET]  Reset Main Settings", function()
     Config.FOV = 70
     Config.AimFOV = 140
     Config.AimSmoothness = 0.20
+    Config.WalkSpeedOverride = false
+    Config.JumpPowerOverride = false
     Config.HipHeightOverride = false
 
     MarkConfigDirty()
@@ -3098,7 +3237,6 @@ RefreshConfigUI = function()
 
     RefreshKeyButtons()
 
-
     ApplyCompactMode()
     ApplyResponsiveLayout()
 end
@@ -3291,8 +3429,20 @@ function UpdateESPPlayer(player)
 
     local teamBlocked = IsTeamBlocked(player)
 
+    local targetRoot = character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChildWhichIsA("BasePart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    -- Distance from the character, or from the camera while dead.
+    local cam = getCamera()
+    local origin = (Root and Root.Position) or (cam and cam.CFrame.Position)
+    local distance = (targetRoot and origin) and (origin - targetRoot.Position).Magnitude or nil
+    -- The highlight now respects ESP Max Distance like the text always did.
+    local inRange = distance == nil or distance <= Config.ESPMaxDistance
+
     if data.Highlight then
-        data.Highlight.Enabled = Config.ESP and Config.ESPHighlight and not teamBlocked
+        data.Highlight.Enabled = Config.ESP and Config.ESPHighlight and not teamBlocked and inRange
 
         if Config.RainbowESP then
             data.Highlight.FillColor = Color3.fromHSV((os.clock() * 0.12) % 1, 0.80, 1)
@@ -3303,21 +3453,15 @@ function UpdateESPPlayer(player)
         end
     end
 
-    local targetRoot = character:FindFirstChild("HumanoidRootPart")
-        or character:FindFirstChild("Head")
-        or character:FindFirstChildWhichIsA("BasePart")
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-
     if not data.Info then
         return
     end
 
-    if not targetRoot or not Root then
+    if not distance then
         data.Info.Visible = false
         return
     end
 
-    local distance = (Root.Position - targetRoot.Position).Magnitude
     local lines = {}
 
     if Config.ESPNames then
@@ -3331,7 +3475,7 @@ function UpdateESPPlayer(player)
     end
 
     data.Info.Text = table.concat(lines, "\n")
-    data.Info.Visible = Config.ESP and not teamBlocked and distance <= Config.ESPMaxDistance
+    data.Info.Visible = Config.ESP and not teamBlocked and inRange
     data.Billboard.MaxDistance = Config.ESPMaxDistance
 end
 
@@ -3366,22 +3510,24 @@ function BindESPPlayer(player)
         data.CharacterConnection:Disconnect()
     end
 
+    -- ESP objects are only created while ESP is on (before, every character
+    -- got a Highlight and a BillboardGui even with ESP never enabled).
     data.CharacterConnection = player.CharacterAdded:Connect(function(character)
         -- Rebuild immediately and again after the rig finished loading.
         task.defer(function()
-            if ESP[player] and player.Character == character then
+            if Config.ESP and ESP[player] and player.Character == character then
                 EnsureESPObjects(player, character)
             end
         end)
 
         task.delay(0.5, function()
-            if ESP[player] and player.Character == character then
+            if Config.ESP and ESP[player] and player.Character == character then
                 EnsureESPObjects(player, character)
             end
         end)
     end)
 
-    if player.Character then
+    if player.Character and Config.ESP then
         EnsureESPObjects(player, player.Character)
     end
 end
@@ -3390,7 +3536,7 @@ for _, player in ipairs(Players:GetPlayers()) do
     BindESPPlayer(player)
 end
 
-Players.PlayerAdded:Connect(BindESPPlayer)
+Track(Players.PlayerAdded:Connect(BindESPPlayer))
 
 --============================================================
 -- TRACERS
@@ -3555,26 +3701,30 @@ function UpdateFly()
     local move = Vector3.zero
     local vertical = 0
 
-    if not IsTyping() then
-        if UIS:IsKeyDown(Enum.KeyCode.W) then move += forward end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then move -= forward end
-        if UIS:IsKeyDown(Enum.KeyCode.D) then move += rightFlat end
-        if UIS:IsKeyDown(Enum.KeyCode.A) then move -= rightFlat end
+    -- The free camera uses the same keys, so the character stays in place
+    -- meanwhile (before, flying moved the character and the camera at once).
+    if not Config.FreeCamera then
+        if not IsTyping() then
+            if UIS:IsKeyDown(Enum.KeyCode.W) then move += forward end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then move -= forward end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then move += rightFlat end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then move -= rightFlat end
 
-        if UIS:IsKeyDown(Enum.KeyCode.Space) then
-            vertical += 1
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then
+                vertical += 1
+            end
+            if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+                vertical -= 1
+            end
         end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
-            vertical -= 1
-        end
-    end
 
-    -- Touch / gamepad: use the humanoid's move direction and jump button.
-    if move.Magnitude < 0.01 then
-        move = Humanoid.MoveDirection
-    end
-    if vertical == 0 and IsTouchDevice and Humanoid.Jump then
-        vertical = 1
+        -- Touch / gamepad: use the humanoid's move direction and jump button.
+        if move.Magnitude < 0.01 then
+            move = Humanoid.MoveDirection
+        end
+        if vertical == 0 and IsTouchDevice and Humanoid.Jump then
+            vertical = 1
+        end
     end
 
     move = safeUnit(Vector3.new(move.X, 0, move.Z))
@@ -3601,7 +3751,9 @@ function UpdateNoclip()
                 if SavedCollision[object] == nil then
                     SavedCollision[object] = object.CanCollide
                 end
-                object.CanCollide = false
+                if object.CanCollide then
+                    object.CanCollide = false
+                end
             end
         end
     elseif next(SavedCollision) then
@@ -3638,28 +3790,30 @@ function UpdateHumanoidProperties()
         return
     end
 
+    -- WalkSpeed / JumpPower go through SetManaged like everything else, so
+    -- the game's own values come back when the override ends (also on Panic).
+    local speedActive = Config.WalkSpeedOverride
     local speed = Config.WalkSpeed
     if Config.FreeCamera then
-        speed = 0 -- the character must not walk while the free camera moves
+        -- the character must not walk while the free camera moves
+        speedActive = true
+        speed = 0
     elseif Config.SprintKey
         and not Config.Fly
         and not IsTyping()
         and UIS:IsKeyDown(Enum.KeyCode.LeftShift)
     then
+        speedActive = true
         speed = Config.SprintSpeed
     end
+    SetManaged(Humanoid, "WalkSpeed", speedActive, speed)
 
-    if Humanoid.WalkSpeed ~= speed then
-        Humanoid.WalkSpeed = speed
-    end
-
+    -- UseJumpPower is only switched on while JumpPower is overridden. Forcing
+    -- it permanently changed the jump in games that use JumpHeight.
+    local jumpActive = Config.JumpPowerOverride or Config.FreeCamera
     local jump = Config.FreeCamera and 0 or Config.JumpPower
-    if not Humanoid.UseJumpPower then
-        Humanoid.UseJumpPower = true
-    end
-    if Humanoid.JumpPower ~= jump then
-        Humanoid.JumpPower = jump
-    end
+    SetManaged(Humanoid, "UseJumpPower", jumpActive, true)
+    SetManaged(Humanoid, "JumpPower", jumpActive, jump)
 
     -- These are only overridden while a feature needs them. Forcing them
     -- every frame broke shift-lock (AutoRotate) and game ragdoll systems.
@@ -3681,6 +3835,8 @@ end
 
 --============================================================
 -- MOVEMENT HELPERS
+-- None of these run while flying: they changed the velocity every frame
+-- and fought the fly constraint.
 --============================================================
 
 function IsGrounded()
@@ -3688,7 +3844,7 @@ function IsGrounded()
 end
 
 function UpdateBunnyHop(dt)
-    if not Config.BunnyHop or not Humanoid or not Root then
+    if not Config.BunnyHop or Config.Fly or not Humanoid or not Root then
         return
     end
 
@@ -3714,7 +3870,7 @@ function UpdateBunnyHop(dt)
 
     if moving and Config.BhopAirStrafe then
         local wishDir = Humanoid.MoveDirection.Unit
-        local maxSpeed = math.max(Config.BhopMaxSpeed, Config.WalkSpeed)
+        local maxSpeed = math.max(Config.BhopMaxSpeed, Humanoid.WalkSpeed)
         local addSpeed = maxSpeed - horizontal:Dot(wishDir)
 
         if addSpeed > 0 then
@@ -3735,7 +3891,7 @@ function UpdateBunnyHop(dt)
 end
 
 function UpdateGlide()
-    if not Config.Glide or not Root or not Humanoid or IsGrounded() then
+    if not Config.Glide or Config.Fly or not Root or not Humanoid or IsGrounded() then
         return
     end
 
@@ -3746,16 +3902,19 @@ function UpdateGlide()
 end
 
 function UpdateHover()
-    if not Config.Hover or not Root or not Humanoid or IsGrounded() then
+    if not Config.Hover or Config.Fly or not Root or not Humanoid or IsGrounded() then
         return
     end
 
+    -- Only stops falling. Zeroing upward speed too made jumping impossible.
     local velocity = Root.AssemblyLinearVelocity
-    Root.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+    if velocity.Y < 0 then
+        Root.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+    end
 end
 
 function UpdateEdgeJump()
-    if not Config.EdgeJump or not Humanoid then
+    if not Config.EdgeJump or Config.Fly or not Humanoid then
         ExtraState.PreviousOnGround = true
         return
     end
@@ -3781,14 +3940,19 @@ function UpdateMovementExtras(dt)
     local ex = ExtraState.Extras
     local grounded = IsGrounded()
 
-    if Config.FastFall and Humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+    if Config.FastFall
+        and not Config.Fly
+        and Humanoid:GetState() == Enum.HumanoidStateType.Freefall
+    then
         local v = Root.AssemblyLinearVelocity
-        if v.Y > -Config.FastFallSpeed then
+        -- Only while already falling: Freefall also covers the rising part
+        -- of a jump, so every jump used to be cut off right away.
+        if v.Y < 0 and v.Y > -Config.FastFallSpeed then
             Root.AssemblyLinearVelocity = Vector3.new(v.X, -Config.FastFallSpeed, v.Z)
         end
     end
 
-    if Config.LandBoost and grounded and not ex.LastOnGround then
+    if Config.LandBoost and not Config.Fly and grounded and not ex.LastOnGround then
         local dir = Humanoid.MoveDirection
         if dir.Magnitude > 0.05 then
             Root.AssemblyLinearVelocity += dir.Unit * Config.LandBoostPower
@@ -3796,11 +3960,11 @@ function UpdateMovementExtras(dt)
     end
     ex.LastOnGround = grounded
 
-    if Config.AirControl and not Config.BunnyHop and not grounded then
+    if Config.AirControl and not Config.BunnyHop and not Config.Fly and not grounded then
         local dir = Humanoid.MoveDirection
         if dir.Magnitude > 0.05 then
             local v = Root.AssemblyLinearVelocity
-            local target = dir.Unit * math.max(Vector3.new(v.X, 0, v.Z).Magnitude, Config.WalkSpeed)
+            local target = dir.Unit * math.max(Vector3.new(v.X, 0, v.Z).Magnitude, Humanoid.WalkSpeed)
             local alpha = math.clamp(Config.AirControlStrength * dt * 8, 0, 1)
             Root.AssemblyLinearVelocity = Vector3.new(
                 v.X + (target.X - v.X) * alpha,
@@ -3847,7 +4011,7 @@ end
 -- INFINITE JUMP
 --============================================================
 
-UIS.JumpRequest:Connect(function()
+Track(UIS.JumpRequest:Connect(function()
     if not Humanoid or Humanoid.Health <= 0 then
         return
     end
@@ -3855,7 +4019,7 @@ UIS.JumpRequest:Connect(function()
     if Config.InfiniteJump then
         Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end
-end)
+end))
 
 --============================================================
 -- CLICK TELEPORT
@@ -3899,7 +4063,7 @@ end
 -- ANTI AFK
 --============================================================
 
-LocalPlayer.Idled:Connect(function()
+Track(LocalPlayer.Idled:Connect(function()
     if not Config.AntiAFK then
         return
     end
@@ -3913,7 +4077,7 @@ LocalPlayer.Idled:Connect(function()
         ExtraState.AntiAFKWarned = true
         Notify("Anti-AFK", "VirtualUser is not available in this context.", 4)
     end
-end)
+end))
 
 --============================================================
 -- LOCAL INVISIBLE / SELF CHAMS
@@ -3996,7 +4160,9 @@ function NormalizeSkyId(value)
         return "rbxassetid://" .. fromQuery
     end
 
-    local fromPath = value:match("/library/(%d+)") or value:match("/asset/(%d+)")
+    local fromPath = value:match("/library/(%d+)")
+        or value:match("/asset/(%d+)")
+        or value:match("/catalog/(%d+)")
     if fromPath then
         return "rbxassetid://" .. fromPath
     end
@@ -4021,6 +4187,9 @@ SkyFaces = {"SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxU
 --   {Kind = "Error", Message = "..."}
 SkyAssetCache = {}
 SkyAssetLoading = {}
+-- Last message shown per ID. Retried IDs used to repeat the same
+-- notification every 30 seconds.
+SkyAssetMessages = {}
 
 -- Sky settings copied from skybox models (besides the six faces).
 SkyCopyProps = {
@@ -4097,9 +4266,26 @@ function LoadSkyFromServer(assetId)
         return nil, nil
     end
 
-    local ok, result = pcall(function()
-        return remote:InvokeServer(assetId)
+    -- InvokeServer never returns when the server has no handler for the
+    -- remote, which left the skybox on "LOADING..." forever. It now gives
+    -- up after 10 seconds.
+    local finished, ok, result = false, false, nil
+
+    task.spawn(function()
+        ok, result = pcall(function()
+            return remote:InvokeServer(assetId)
+        end)
+        finished = true
     end)
+
+    local deadline = os.clock() + 10
+    while not finished and os.clock() < deadline do
+        task.wait(0.1)
+    end
+
+    if not finished then
+        return nil, "Sky server did not respond."
+    end
 
     if not ok or type(result) ~= "table" then
         return nil, "Sky server error: " .. tostring(result)
@@ -4284,9 +4470,12 @@ function GetSkyAsset(raw)
 
             SkyAssetCache[assetId] = asset
             SkyAssetLoading[assetId] = nil
-            SkyboxForceRefresh = true
+            -- No forced rebuild here: UpdateSkybox rebuilds by itself when
+            -- the resolved faces differ, and a retry that resolves to the
+            -- same image no longer recreates the sky every 30 seconds.
 
-            if message then
+            if message and SkyAssetMessages[assetId] ~= message then
+                SkyAssetMessages[assetId] = message
                 Notify("Local Skybox", message, 4)
             end
 
@@ -4766,8 +4955,10 @@ function GetConfiguredAimPart(character, humanoid)
         return GetRandomAimPart(character, humanoid, false)
     end
 
-    -- Fall back for parts that do not exist on this rig (e.g. UpperTorso on R6).
+    -- Fall back for parts that do not exist on this rig. "Torso" on an R15
+    -- rig used to fall through to HumanoidRootPart instead of UpperTorso.
     return character:FindFirstChild(Config.AimPart)
+        or character:FindFirstChild("UpperTorso")
         or character:FindFirstChild("Torso")
         or character:FindFirstChild("HumanoidRootPart")
 end
@@ -4786,12 +4977,12 @@ for _, object in ipairs(Workspace:GetDescendants()) do
     TrackAimHumanoid(object)
 end
 
-Workspace.DescendantAdded:Connect(TrackAimHumanoid)
-Workspace.DescendantRemoving:Connect(function(object)
+Track(Workspace.DescendantAdded:Connect(TrackAimHumanoid))
+Track(Workspace.DescendantRemoving:Connect(function(object)
     if AimHumanoids[object] then
         AimHumanoids[object] = nil
     end
-end)
+end))
 
 function GetTargetRootPart(model)
     return model:FindFirstChild("HumanoidRootPart")
@@ -4870,6 +5061,9 @@ function FindAimTarget()
     end
 
     -- Bots, dummies and other NPCs (any Humanoid model that is not a player).
+    -- First-person viewmodels (models with a Humanoid under the camera) and
+    -- models inside the own character were targeted too, which spun the
+    -- camera onto the player's own arms.
     if Config.AimNPCs then
         for humanoid in pairs(AimHumanoids) do
             local model = humanoid.Parent
@@ -4877,6 +5071,8 @@ function FindAimTarget()
                 and model:IsA("Model")
                 and model ~= Character
                 and model:IsDescendantOf(Workspace)
+                and not model:IsDescendantOf(cam)
+                and not (Character and model:IsDescendantOf(Character))
                 and not Players:GetPlayerFromCharacter(model)
             then
                 consider(model, humanoid, nil)
@@ -4913,6 +5109,12 @@ end
 
 function UpdateAim(dt)
     if not Config.AimAssist or Config.FreeCamera or Config.OrbitCamera or not AimActive() then
+        ClearAimTarget()
+        return
+    end
+
+    local cam = getCamera()
+    if not cam then
         ClearAimTarget()
         return
     end
@@ -4971,7 +5173,6 @@ function UpdateAim(dt)
         return
     end
 
-    local cam = getCamera()
     local desired = CFrame.lookAt(cam.CFrame.Position, part.Position)
 
     -- Frame-rate independent smoothing (same feel as before at 60 FPS).
@@ -5044,6 +5245,12 @@ function UpdateFreeCamera(dt)
         end
     end
 
+    -- Touch / gamepad: the thumbstick still sets MoveDirection (relative to
+    -- the free camera) even though the character cannot walk.
+    if direction.Magnitude < 0.01 and Humanoid then
+        direction = Humanoid.MoveDirection
+    end
+
     direction = safeUnit(direction)
 
     local speed = Config.FreeCameraSpeed
@@ -5061,6 +5268,10 @@ function UpdateOrbitCamera()
     end
 
     local cam = getCamera()
+    if not cam then
+        return
+    end
+
     local center = Root.Position
     local radius = Config.CameraDistance
     local angle = os.clock() * math.rad(Config.OrbitSpeed)
@@ -5080,7 +5291,9 @@ end
 function UpdateZoomAndMode()
     local minValue, maxValue
 
-    if Config.ThirdPerson then
+    -- Lock First Person wins: Third Person used to force the minimum zoom
+    -- out to Camera Distance even while first person was locked.
+    if Config.ThirdPerson and not Config.LockFirstPerson then
         local originalMax = GetOriginal(LocalPlayer, "CameraMaxZoomDistance") or 128
         minValue = Config.CameraDistance
         maxValue = math.max(Config.CameraDistance, Config.DisableZoomLimits and Config.ZoomMax or originalMax)
@@ -5141,7 +5354,13 @@ function UpdateCameraMotion(dt)
         SetManaged(cam, "FieldOfView", false)
     end
 
-    if Config.CameraTilt and Root and not Config.FreeCamera then
+    -- A Scriptable camera (cutscenes, menus, Orbit) is not rebuilt by the
+    -- camera script every frame, so the roll used to add up and spin it.
+    if Config.CameraTilt
+        and Root
+        and not Config.FreeCamera
+        and cam.CameraType ~= Enum.CameraType.Scriptable
+    then
         local side = cam.CFrame.RightVector:Dot(Root.AssemblyLinearVelocity)
         local tilt = math.clamp(-side * 0.01 * Config.CameraTiltStrength, -8, 8)
         cam.CFrame = cam.CFrame * CFrame.Angles(0, 0, math.rad(tilt))
@@ -5157,7 +5376,12 @@ function UpdateCameraExtras()
 
     local scripted = Config.FreeCamera or Config.OrbitCamera
 
-    if Config.ShoulderCamera and not scripted then
+    -- Same as Camera Tilt: on a Scriptable camera the offset added up every
+    -- frame and the camera drifted away sideways.
+    if Config.ShoulderCamera
+        and not scripted
+        and cam.CameraType ~= Enum.CameraType.Scriptable
+    then
         cam.CFrame = cam.CFrame * CFrame.new(Config.ShoulderOffset, 0, 0)
     end
 
@@ -5332,7 +5556,7 @@ end
 -- PLAYER CLEANUP
 --============================================================
 
-Players.PlayerRemoving:Connect(function(player)
+Track(Players.PlayerRemoving:Connect(function(player)
     RemoveESP(player)
 
     if Tracers[player] then
@@ -5354,13 +5578,16 @@ Players.PlayerRemoving:Connect(function(player)
     if CurrentTarget and CurrentTarget.Player == player then
         ClearAimTarget()
     end
-end)
+end))
 
 --============================================================
 -- PANIC
 --============================================================
 
 ActiveFeatureDefinitions = {
+    {field = "WalkSpeedOverride", label = "WalkSpeed"},
+    {field = "JumpPowerOverride", label = "JumpPower"},
+    {field = "HipHeightOverride", label = "HipHeight"},
     {field = "Fly", label = "Fly"},
     {field = "Noclip", label = "Noclip"},
     {field = "InfiniteJump", label = "Infinite Jump"},
@@ -5443,22 +5670,42 @@ ActiveFeatureDefinitions = {
     {field = "PartInspector", label = "Part Inspector"},
 }
 
--- Panic now really turns every feature off (all overrides are restored by
--- the managed-property system on the next frame) and hides the GUI.
--- Before, it only hid the window while fly/noclip/ESP kept running.
-function Panic()
+-- Turns every feature off. The managed-property system and the caches
+-- restore the game's own values on the next update.
+function ResetFeatures()
     for _, definition in ipairs(ActiveFeatureDefinitions) do
         Config[definition.field] = false
     end
     Config.RespawnPoint = "Default"
+    Config.AutoRotate = true
+
+    -- These sliders change the game on their own while left at a custom
+    -- value, so Panic used to leave the FOV / colors / animations changed.
+    Config.FOV = 70
+    Config.ColorSaturation = 0
+    Config.ColorContrast = 0
+    Config.AnimationSpeed = 1
 
     ClearAimTarget()
     CapturingKeybind = nil
     CapturingGlobalKeybind = nil
+    EndSliderDrag()
+
+    -- Sit only set Humanoid.Sit, so clearing the flag alone did not stand up.
+    if Humanoid and Humanoid.Sit and not Humanoid.SeatPart then
+        Humanoid.Sit = false
+    end
 
     if TargetMenu then
         TargetMenu.Visible = false
     end
+end
+
+-- Panic now really turns every feature off (all overrides are restored by
+-- the managed-property system on the next frame) and hides the GUI.
+-- Before, it only hid the window while fly/noclip/ESP kept running.
+function Panic()
+    ResetFeatures()
 
     MarkConfigDirty()
     if RefreshConfigUI then
@@ -5472,6 +5719,20 @@ end
 -- INPUT (single handler so capture / open / panic / feature keys run in
 -- a fixed order and never double-trigger on the same key press)
 --============================================================
+
+-- A key that becomes the Open or Panic key can no longer toggle a feature
+-- (the Open / Panic check runs first), so such feature binds are removed.
+function ClearFeatureBindsFor(key)
+    for featureId, bound in pairs(Keybinds) do
+        if bound == key then
+            Keybinds[featureId] = nil
+            local controller = ToggleControllers[featureId]
+            if controller then
+                controller.Refresh(false)
+            end
+        end
+    end
+end
 
 function HandleGlobalCapture(input)
     local target = CapturingGlobalKeybind
@@ -5503,12 +5764,14 @@ function HandleGlobalCapture(input)
             Notify("Keybind", "That key is already the Panic Key.", 2)
         else
             Config.OpenKey = input.KeyCode
+            ClearFeatureBindsFor(input.KeyCode)
         end
     elseif target == "PanicKey" then
         if input.KeyCode == Config.OpenKey then
             Notify("Keybind", "That key is already the Open Key.", 2)
         else
             Config.PanicKey = input.KeyCode
+            ClearFeatureBindsFor(input.KeyCode)
         end
     end
 
@@ -5561,7 +5824,7 @@ function HandleFeatureCapture(input)
     controller.Refresh(false)
 end
 
-UIS.InputBegan:Connect(function(input, processed)
+Track(UIS.InputBegan:Connect(function(input, processed)
     if CapturingGlobalKeybind then
         HandleGlobalCapture(input)
         return
@@ -5572,11 +5835,10 @@ UIS.InputBegan:Connect(function(input, processed)
         return
     end
 
-    if processed then
-        return
-    end
-
-    if input.UserInputType == Enum.UserInputType.Keyboard then
+    -- Open / Panic also work when the game marks the key as processed:
+    -- RightShift is bound to shift lock, and with shift lock enabled the
+    -- menu could not be opened at all. Never while typing in a text box.
+    if input.UserInputType == Enum.UserInputType.Keyboard and not IsTyping() then
         if input.KeyCode == Config.OpenKey then
             ToggleMenu()
             return
@@ -5586,7 +5848,13 @@ UIS.InputBegan:Connect(function(input, processed)
             Panic()
             return
         end
+    end
 
+    if processed then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard then
         if input.KeyCode == Enum.KeyCode.Q and Config.Dash and not Config.FreeCamera then
             DoDash()
         end
@@ -5618,7 +5886,7 @@ UIS.InputBegan:Connect(function(input, processed)
             DoClickTeleport()
         end
     end
-end)
+end))
 
 --============================================================
 -- NETWORK INFO
@@ -6036,15 +6304,19 @@ function DoDash()
     if now - ExtraState.LastDash < 0.6 then
         return
     end
-    ExtraState.LastDash = now
 
     local direction = Humanoid.MoveDirection
     if direction.Magnitude < 0.05 then
         local cam = getCamera()
+        if not cam then
+            return
+        end
         direction = safeUnit(Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z))
     else
         direction = direction.Unit
     end
+
+    ExtraState.LastDash = now
 
     local velocity = Root.AssemblyLinearVelocity
     Root.AssemblyLinearVelocity = Vector3.new(
@@ -6210,7 +6482,9 @@ function UpdateAntiFling()
                         if OtherCollisionCache[object] == nil then
                             OtherCollisionCache[object] = object.CanCollide
                         end
-                        object.CanCollide = false
+                        if object.CanCollide then
+                            object.CanCollide = false
+                        end
                     end
                 end
             end
@@ -6414,7 +6688,7 @@ function DoClickDelete()
     Notify("Click Delete", "Removed " .. part.Name .. " (only for you).", 1.5)
 end
 
-function RestoreDeletedParts()
+function RestoreDeletedParts(silent)
     local count = 0
 
     for index = #DeletedParts, 1, -1 do
@@ -6428,7 +6702,9 @@ function RestoreDeletedParts()
         DeletedParts[index] = nil
     end
 
-    Notify("Click Delete", "Restored " .. count .. " part(s).", 2)
+    if not silent then
+        Notify("Click Delete", "Restored " .. count .. " part(s).", 2)
+    end
 end
 
 InspectorLabel = Instance.new("TextLabel")
@@ -6497,15 +6773,23 @@ end
 
 function SetupCharacter(character)
     Character = character
-    Humanoid = character:WaitForChild("Humanoid")
-    Root = character:WaitForChild("HumanoidRootPart")
+    -- Cleared first, so nothing keeps using the previous (dead) humanoid
+    -- while the new rig is still loading.
+    Humanoid = nil
+    Root = nil
 
+    local humanoid = character:WaitForChild("Humanoid")
+    local root = character:WaitForChild("HumanoidRootPart")
+
+    -- A newer character arrived while waiting. Before, this older call then
+    -- overwrote Humanoid / Root with the parts of the outdated character.
     if Character ~= character then
         return
     end
 
-    local humanoid = Humanoid
-    local root = Root
+    Humanoid = humanoid
+    Root = root
+
     humanoid.Died:Connect(function()
         ExtraState.DeathCount += 1
         -- Last grounded spot, so dying in the void does not respawn you there.
@@ -6583,7 +6867,7 @@ function OnCharacterAdded(character)
     end
 end
 
-LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+Track(LocalPlayer.CharacterAdded:Connect(OnCharacterAdded))
 
 if LocalPlayer.Character then
     task.spawn(OnCharacterAdded, LocalPlayer.Character)
@@ -6596,12 +6880,28 @@ end
 ESPAccumulator = 0
 InfoAccumulator = 0
 
-RunService.Stepped:Connect(function()
+function UpdatePhysicsStep()
     SafeCall("Noclip", UpdateNoclip)
     SafeCall("AntiFling", UpdateAntiFling)
-end)
+end
 
-RunService.RenderStepped:Connect(function(dt)
+-- Text and slow-changing state, refreshed 5 times per second.
+function UpdateSlow()
+    SafeCall("HomeInfo", UpdateHomeInfo)
+    SafeCall("ActiveInfo", UpdateActiveInfo)
+    SafeCall("CharacterInfo", UpdateCharacterInfo)
+    SafeCall("Waypoints", UpdateWaypoints)
+    SafeCall("DebugInfo", UpdateDebugInfo)
+    SafeCall("StopAnimations", UpdateStopAnimations)
+    SafeCall("AnimationSpeed", UpdateAnimationSpeed)
+    SafeCall("StatusOverlay", UpdateStatusOverlay)
+    SafeCall("Diagnostics", UpdateDiagnostics)
+    SafeCall("ExtraOverlay", UpdateExtraOverlay)
+    SafeCall("OtherPlayers", UpdateOtherPlayersVisibility)
+    SkyStatusInfo.Text = "SKYBOX      " .. SkyboxStatus
+end
+
+function UpdateFrame(dt)
     FrameCounter += 1
 
     local now = os.clock()
@@ -6664,20 +6964,92 @@ RunService.RenderStepped:Connect(function(dt)
     InfoAccumulator += dt
     if InfoAccumulator >= 0.2 then
         InfoAccumulator = 0
-        SafeCall("HomeInfo", UpdateHomeInfo)
-        SafeCall("ActiveInfo", UpdateActiveInfo)
-        SafeCall("CharacterInfo", UpdateCharacterInfo)
-        SafeCall("Waypoints", UpdateWaypoints)
-        SafeCall("DebugInfo", UpdateDebugInfo)
-        SafeCall("StopAnimations", UpdateStopAnimations)
-        SafeCall("AnimationSpeed", UpdateAnimationSpeed)
-        SafeCall("StatusOverlay", UpdateStatusOverlay)
-        SafeCall("Diagnostics", UpdateDiagnostics)
-        SafeCall("ExtraOverlay", UpdateExtraOverlay)
-        SafeCall("OtherPlayers", UpdateOtherPlayersVisibility)
-        SkyStatusInfo.Text = "SKYBOX      " .. SkyboxStatus
+        UpdateSlow()
     end
-end)
+end
+
+Track(RunService.Stepped:Connect(UpdatePhysicsStep))
+Track(RunService.RenderStepped:Connect(UpdateFrame))
+
+--============================================================
+-- SHUTDOWN (Unload button, and automatically when the script runs again)
+--============================================================
+
+function Shutdown()
+    if ShutdownDone then
+        return
+    end
+    ShutdownDone = true
+
+    -- One last update with every feature off restores the game's own
+    -- values through the managed properties and the caches.
+    ResetFeatures()
+    SafeCall("Shutdown:Physics", UpdatePhysicsStep)
+    SafeCall("Shutdown:Frame", UpdateFrame, 0)
+    SafeCall("Shutdown:Slow", UpdateSlow)
+
+    for _, connection in ipairs(Connections) do
+        connection:Disconnect()
+    end
+    table.clear(Connections)
+
+    if CameraViewportConnection then
+        CameraViewportConnection:Disconnect()
+        CameraViewportConnection = nil
+    end
+
+    pcall(function()
+        RunService:UnbindFromRenderStep("DexiAutoWalk")
+    end)
+
+    -- Anything still overridden goes back to its original value.
+    for object, store in pairs(ManagedProps) do
+        for property, entry in pairs(store) do
+            pcall(function()
+                object[property] = entry.Value
+            end)
+        end
+    end
+    table.clear(ManagedProps)
+
+    DestroyFly()
+    PendingSkyId = nil
+    DestroyCreatedSky()
+    RestoreGameSkies()
+    RestoreDeletedParts(true)
+
+    for player in pairs(ESP) do
+        RemoveESP(player)
+    end
+
+    local ex = ExtraState.Extras
+    for player, gui in pairs(ex.HeadDots) do
+        gui:Destroy()
+        ex.HeadDots[player] = nil
+    end
+    if ex.ColorCorrection then
+        ex.ColorCorrection:Destroy()
+        ex.ColorCorrection = nil
+    end
+    local nightVision = Lighting:FindFirstChild("DexiNightVision")
+    if nightVision then
+        nightVision:Destroy()
+    end
+    if SelfTrail then
+        SelfTrail:Destroy()
+        SelfTrail = nil
+    end
+
+    UINotifications = nil
+    Gui:Destroy()
+    ToggleGui:Destroy()
+
+    if _G.DexiShutdown == Shutdown then
+        _G.DexiShutdown = nil
+    end
+end
+
+_G.DexiShutdown = Shutdown
 
 --============================================================
 -- INITIAL STATE
@@ -6687,14 +7059,7 @@ SetPage("Home")
 ApplyCompactMode()
 ApplyResponsiveLayout()
 
-SafeCall("HomeInfo", UpdateHomeInfo)
-SafeCall("ActiveInfo", UpdateActiveInfo)
-SafeCall("CharacterInfo", UpdateCharacterInfo)
-SafeCall("Waypoints", UpdateWaypoints)
-SafeCall("DebugInfo", UpdateDebugInfo)
-SafeCall("StatusOverlay", UpdateStatusOverlay)
-SafeCall("Diagnostics", UpdateDiagnostics)
-SafeCall("ExtraOverlay", UpdateExtraOverlay)
+UpdateSlow()
 SafeCall("Crosshair", UpdateCrosshair)
 SafeCall("FOVCircle", UpdateFOVCircle)
 SafeCall("LowHealth", UpdateLowHealth)
