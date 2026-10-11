@@ -9,6 +9,7 @@ Lighting = game:GetService("Lighting")
 TeleportService = game:GetService("TeleportService")
 Workspace = game:GetService("Workspace")
 TweenService = game:GetService("TweenService")
+HttpService = game:GetService("HttpService")
 
 -- VirtualUser is not usable from every script context, so fetch it safely.
 do
@@ -600,13 +601,25 @@ end
 
 --============================================================
 -- SIMPLE CONFIG MANAGER
--- NOTE: A LocalScript cannot write DataStores. Configs are session-only
--- until a server-side persistence layer is added.
+-- Saved configs are kept in a file in the executor's workspace folder
+-- (writefile / readfile), so they survive rejoining and stay on this PC.
+-- Without a file API they only last until you leave.
 --============================================================
 
 Profiles = {}
 CurrentProfileName = "Default"
 ConfigDirty = false
+
+ConfigFolder = "DexiScript"
+ConfigFilePath = "DexiScript/configs.json"
+StorageMode = "Checking" -- "Checking" | "File" | "Session" | "Error"
+-- Nothing is written before the stored configs were read, otherwise the
+-- defaults of a fresh run would overwrite them.
+StorageLoaded = false
+PersistPending = false
+PersistRequestedAt = 0
+SessionOnlyWarned = false
+StorageErrorMessage = nil
 
 ProfileNameBox = nil
 ProfileDropdownButton = nil
@@ -632,6 +645,9 @@ function DeepCopy(value, seen)
 
     return copy
 end
+
+-- Untouched defaults, used to check the types of values read from storage.
+DefaultConfig = DeepCopy(Config)
 
 function CleanConfigName(value)
     local name = tostring(value or "")
@@ -673,6 +689,7 @@ function MarkConfigDirty()
     if Config.AutoSaveProfile and Profiles[CurrentProfileName] then
         Profiles[CurrentProfileName] = SnapshotConfig()
         ConfigDirty = false
+        RequestPersist(false)
     end
 
     -- Only the status text is refreshed here. Rebuilding the whole profile
@@ -728,6 +745,7 @@ function SaveCurrentProfile()
         RefreshProfileUI()
     end
     ProfileNotify("Saved: " .. CurrentProfileName)
+    RequestPersist(true)
     return true
 end
 
@@ -748,6 +766,7 @@ function CreateProfile(name)
         RefreshProfileUI()
     end
     ProfileNotify("Created: " .. clean)
+    RequestPersist(true)
     return true
 end
 
@@ -760,6 +779,8 @@ function LoadProfile(name)
     local ok = ApplySnapshot(Profiles[name])
     if ok then
         ProfileNotify("Loaded: " .. name)
+        -- Remembered as the config to load on the next join.
+        RequestPersist(true)
     end
     return ok
 end
@@ -777,12 +798,15 @@ function RenameCurrentProfile(name)
     if clean ~= CurrentProfileName then
         Profiles[clean] = Profiles[CurrentProfileName] or SnapshotConfig()
         Profiles[CurrentProfileName] = nil
+        ForeignWaypoints[clean] = ForeignWaypoints[CurrentProfileName]
+        ForeignWaypoints[CurrentProfileName] = nil
         CurrentProfileName = clean
     end
     if RefreshProfileUI then
         RefreshProfileUI()
     end
     ProfileNotify("Renamed to: " .. clean)
+    RequestPersist(true)
     return true
 end
 
@@ -808,10 +832,318 @@ function DeleteCurrentProfile()
 
     local removed = CurrentProfileName
     Profiles[removed] = nil
+    ForeignWaypoints[removed] = nil
     CurrentProfileName = ConfigNames()[1]
     ApplySnapshot(Profiles[CurrentProfileName])
     ProfileNotify("Deleted: " .. removed)
+    RequestPersist(true)
     return true
+end
+
+--============================================================
+-- CONFIG STORAGE (keeps saved configs between joins)
+--============================================================
+
+-- Runtime-only toggles that make no sense right after joining (there is
+-- no target selected yet), so they are never restored from storage.
+TransientConfigKeys = {
+    SpectateTarget = true,
+    FollowTarget = true,
+    TargetFling = true,
+}
+
+-- JSON has no EnumItem / CFrame, so they are stored as tagged tables.
+function EncodeValue(value)
+    local kind = typeof(value)
+
+    if kind == "EnumItem" then
+        return {__type = "Enum", value = tostring(value)} -- "Enum.KeyCode.E"
+    elseif kind == "CFrame" then
+        return {__type = "CFrame", value = {value:GetComponents()}}
+    elseif kind == "table" then
+        local out = {}
+        for key, child in pairs(value) do
+            if type(key) == "string" then
+                out[key] = EncodeValue(child)
+            end
+        end
+        return out
+    end
+
+    return value
+end
+
+function DecodeValue(value)
+    if type(value) ~= "table" then
+        return value
+    end
+
+    if value.__type == "Enum" then
+        local enumName, itemName = string.match(tostring(value.value), "^Enum%.([^.]+)%.(.+)$")
+        local ok, item = pcall(function()
+            return Enum[enumName][itemName]
+        end)
+        return ok and item or nil
+    elseif value.__type == "CFrame" then
+        local ok, cframe = pcall(function()
+            return CFrame.new(table.unpack(value.value))
+        end)
+        return ok and cframe or nil
+    end
+
+    local out = {}
+    for key, child in pairs(value) do
+        out[key] = DecodeValue(child)
+    end
+    return out
+end
+
+-- The config file is shared by every game, but waypoints are positions in
+-- one specific place. They are saved with their PlaceId and only loaded in
+-- that place; waypoints of other places are kept here per config name and
+-- written back unchanged.
+ForeignWaypoints = {}
+
+function SerializeSnapshot(snapshot, name)
+    local waypoints = {}
+    for index, cframe in pairs(snapshot.Waypoints or {}) do
+        table.insert(waypoints, {Place = game.PlaceId, Index = index, CFrame = EncodeValue(cframe)})
+    end
+    for _, entry in ipairs(ForeignWaypoints[name] or {}) do
+        table.insert(waypoints, entry)
+    end
+
+    return {
+        Config = EncodeValue(snapshot.Config),
+        Keybinds = EncodeValue(snapshot.Keybinds or {}),
+        Waypoints = waypoints,
+    }
+end
+
+-- Only known settings with the right type are taken over, so an old or
+-- damaged file can never put a wrong value type into Config.
+-- Returns the snapshot plus the waypoint entries of other places.
+function DeserializeSnapshot(data)
+    if type(data) ~= "table" or type(data.Config) ~= "table" then
+        return nil
+    end
+
+    local snapshot = {Config = {}, Keybinds = {}, Waypoints = {}}
+
+    for key, raw in pairs(data.Config) do
+        local value = DecodeValue(raw)
+        if not TransientConfigKeys[key] then
+            if key == "AimKey" then
+                if typeof(value) == "EnumItem" then
+                    snapshot.Config.AimKey = value
+                end
+            elseif DefaultConfig[key] ~= nil and typeof(value) == typeof(DefaultConfig[key]) then
+                snapshot.Config[key] = value
+            end
+        end
+    end
+
+    if type(data.Keybinds) == "table" then
+        for featureId, raw in pairs(data.Keybinds) do
+            local key = DecodeValue(raw)
+            if type(featureId) == "string" and typeof(key) == "EnumItem" then
+                snapshot.Keybinds[featureId] = key
+            end
+        end
+    end
+
+    local foreign = {}
+
+    if type(data.Waypoints) == "table" then
+        for _, entry in ipairs(data.Waypoints) do
+            if type(entry) == "table" then
+                local place = tonumber(entry.Place)
+                if place and place ~= game.PlaceId then
+                    table.insert(foreign, entry)
+                else
+                    local index = tonumber(entry.Index)
+                    local cframe = index and DecodeValue(entry.CFrame)
+                    if typeof(cframe) == "CFrame" then
+                        snapshot.Waypoints[index] = cframe
+                    end
+                end
+            end
+        end
+    end
+
+    return snapshot, foreign
+end
+
+function EncodeStore()
+    local list = {}
+    for _, name in ipairs(ConfigNames()) do
+        table.insert(list, {Name = name, Data = SerializeSnapshot(Profiles[name], name)})
+    end
+
+    return HttpService:JSONEncode({
+        Version = 1,
+        Current = CurrentProfileName,
+        Profiles = list,
+    })
+end
+
+-- Returns the profiles, the last used name and the other places'
+-- waypoints, or nil.
+function DecodeStore(json)
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(json)
+    end)
+    if not ok or type(data) ~= "table" or type(data.Profiles) ~= "table" then
+        return nil
+    end
+
+    local profiles = {}
+    local foreignByName = {}
+    local count = 0
+
+    for _, entry in ipairs(data.Profiles) do
+        local name = type(entry) == "table" and CleanConfigName(entry.Name)
+        if name then
+            local snapshot, foreign = DeserializeSnapshot(entry.Data)
+            if snapshot then
+                profiles[name] = snapshot
+                foreignByName[name] = foreign
+                count += 1
+            end
+        end
+    end
+
+    if count == 0 then
+        return nil
+    end
+
+    return profiles, type(data.Current) == "string" and data.Current or nil, foreignByName
+end
+
+function HasFileApi()
+    return type(writefile) == "function" and type(readfile) == "function"
+end
+
+function WriteConfigFile(json)
+    return pcall(function()
+        if type(makefolder) == "function"
+            and not (type(isfolder) == "function" and isfolder(ConfigFolder))
+        then
+            makefolder(ConfigFolder)
+        end
+        writefile(ConfigFilePath, json)
+    end)
+end
+
+function ReadConfigFile()
+    if type(isfile) == "function" then
+        local ok, exists = pcall(isfile, ConfigFilePath)
+        if not ok or not exists then
+            return nil
+        end
+    end
+
+    local ok, json = pcall(readfile, ConfigFilePath)
+    if ok and type(json) == "string" and json ~= "" then
+        return json
+    end
+    return nil
+end
+
+function ReportStorageError(message)
+    if StorageErrorMessage ~= message then
+        StorageErrorMessage = message
+        Notify("Config", "Could not save configs: " .. message, 4)
+    end
+end
+
+-- immediate = explicit action (Save / Create / Load ...). Auto Save fires on
+-- every slider step, so it waits until the value stops changing.
+function RequestPersist(immediate)
+    PersistPending = true
+    PersistRequestedAt = os.clock()
+
+    if StorageMode == "Session" and not SessionOnlyWarned then
+        SessionOnlyWarned = true
+        Notify(
+            "Config",
+            "Your executor has no writefile / readfile: configs are kept only until you leave.",
+            5
+        )
+    end
+
+    if immediate then
+        FlushPersist(true)
+    end
+end
+
+function FlushPersist(force)
+    if not PersistPending or not StorageLoaded then
+        return
+    end
+
+    if StorageMode ~= "File" then
+        PersistPending = false
+        return
+    end
+
+    if not force and os.clock() - PersistRequestedAt < 0.5 then
+        return
+    end
+
+    PersistPending = false
+
+    local encoded, json = pcall(EncodeStore)
+    if not encoded then
+        ReportStorageError(tostring(json))
+        return
+    end
+
+    local ok, err = WriteConfigFile(json)
+    if ok then
+        StorageErrorMessage = nil
+    else
+        ReportStorageError(tostring(err))
+    end
+end
+
+function ApplyStoredProfiles(profiles, current, foreignByName)
+    table.clear(Profiles)
+    for name, snapshot in pairs(profiles) do
+        Profiles[name] = snapshot
+    end
+    ForeignWaypoints = foreignByName or {}
+
+    CurrentProfileName = (current and Profiles[current]) and current or ConfigNames()[1]
+    ApplySnapshot(Profiles[CurrentProfileName])
+end
+
+-- Reads the saved configs once at startup and loads the last used one.
+function LoadStoredProfiles()
+    if not HasFileApi() then
+        StorageMode = "Session"
+        StorageLoaded = true
+        RefreshProfileUI()
+        return
+    end
+
+    StorageMode = "File"
+    local json = ReadConfigFile()
+
+    if json then
+        local profiles, current, foreignByName = DecodeStore(json)
+        if profiles then
+            ApplyStoredProfiles(profiles, current, foreignByName)
+            Notify("Config", "Loaded config: " .. CurrentProfileName, 3)
+        else
+            -- The damaged file is kept instead of being overwritten.
+            pcall(writefile, ConfigFolder .. "/configs.broken.json", json)
+            Notify("Config", "Saved configs were damaged and could not be read.", 4)
+        end
+    end
+
+    StorageLoaded = true
+    RefreshProfileUI()
 end
 
 --============================================================
@@ -2992,7 +3324,11 @@ end)
 
 Section(SettingsPage, "Configs")
 
-ProfileStatus = InfoBox(SettingsPage, "CONFIG      Default\nSTATE       Saved\nCOUNT       1", 58)
+ProfileStatus = InfoBox(
+    SettingsPage,
+    "CONFIG      Default\nSTATE       Saved\nCOUNT       1\nSTORAGE     Checking...",
+    72
+)
 
 ConfigNameRow = Instance.new("Frame")
 ConfigNameRow.Name = "ConfigNameRow"
@@ -3157,12 +3493,19 @@ ConfigToggle(SettingsPage, "Auto Save Config", "AutoSaveProfile")
 ConfigToggle(SettingsPage, "Confirm Config Delete", "ConfirmDeleteProfile")
 ConfigToggle(SettingsPage, "Config Notifications", "NotifyProfileChanges")
 
+StorageLabels = {
+    Checking = "Checking...",
+    File = "File (" .. ConfigFilePath .. ")",
+    Session = "This session only (no writefile)",
+}
+
 function RefreshProfileStatus()
     if ProfileStatus then
         ProfileStatus.Text =
             "CONFIG      " .. CurrentProfileName
             .. "\nSTATE       " .. (ConfigDirty and "Changed" or "Saved")
             .. "\nCOUNT       " .. tostring(#ConfigNames())
+            .. "\nSTORAGE     " .. (StorageLabels[StorageMode] or StorageMode)
     end
 end
 
@@ -4227,97 +4570,10 @@ function ReadSkyObject(sky)
     return result
 end
 
--- Skybox library: ReplicatedStorage.DexiSkies holds Sky objects that were
--- imported in Studio (see DexiSkyImport.lua). A live game is not allowed to
--- load other creators' models, but anything saved in the place can be read
--- by the client. A Sky matches an ID by its AssetId attribute or its name
--- (the Sky's own name or the name of the model it is in).
-function FindLibrarySky(key)
-    local library = game:GetService("ReplicatedStorage"):FindFirstChild("DexiSkies")
-    if not library then
-        return nil
-    end
-
-    key = string.lower(tostring(key))
-
-    for _, object in ipairs(library:GetDescendants()) do
-        if object:IsA("Sky") then
-            local holder = object.Parent ~= library and object.Parent or nil
-            local tagged = object:GetAttribute("AssetId") or (holder and holder:GetAttribute("AssetId"))
-
-            if (tagged and tostring(tagged) == key)
-                or string.lower(object.Name) == key
-                or (holder and string.lower(holder.Name) == key)
-            then
-                return object
-            end
-        end
-    end
-
-    return nil
-end
-
--- Asks the DexiSkyServer script (ServerScriptService) to read the skybox
--- model. The server never parents the model anywhere; it only returns the
--- face IDs and sky settings, so the sky stays local to this player.
-function LoadSkyFromServer(assetId)
-    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("DexiSkyLoader")
-    if not remote or not remote:IsA("RemoteFunction") then
-        return nil, nil
-    end
-
-    -- InvokeServer never returns when the server has no handler for the
-    -- remote, which left the skybox on "LOADING..." forever. It now gives
-    -- up after 10 seconds.
-    local finished, ok, result = false, false, nil
-
-    task.spawn(function()
-        ok, result = pcall(function()
-            return remote:InvokeServer(assetId)
-        end)
-        finished = true
-    end)
-
-    local deadline = os.clock() + 10
-    while not finished and os.clock() < deadline do
-        task.wait(0.1)
-    end
-
-    if not finished then
-        return nil, "Sky server did not respond."
-    end
-
-    if not ok or type(result) ~= "table" then
-        return nil, "Sky server error: " .. tostring(result)
-    end
-
-    if result.Error then
-        if result.NotAuthorized then
-            return nil, "Roblox only lets a game load models owned by its creator. "
-                .. "Import this skybox once in Studio with DexiSkyImport.lua."
-        end
-        return nil, tostring(result.Error)
-    end
-
-    if type(result.Faces) ~= "table" then
-        return nil, "Sky server returned no faces."
-    end
-
-    return {Kind = "Sky", Faces = result.Faces, Props = result.Props or {}}
-end
-
--- Toolbox skyboxes are Models with a Sky inside. A LocalScript in a live game
--- cannot load models by ID, so the sources are tried in order:
---   0. DexiSkies library      - skyboxes imported into the place in Studio
---   1. game:GetObjects        - executors, Studio command bar, plugins
---   2. DexiSkyServer remote   - only models owned by the game's creator
---   3. InsertService          - contexts that allow it
+-- Toolbox skyboxes are Models with a Sky inside. They are read with the
+-- executor's game:GetObjects; the model is never parented anywhere, only
+-- its face IDs and sky settings are copied, so nothing leaves the client.
 function LoadSkyFromModel(assetId)
-    local librarySky = FindLibrarySky(assetId)
-    if librarySky then
-        return ReadSkyObject(librarySky)
-    end
-
     local roots
 
     local ok = pcall(function()
@@ -4325,21 +4581,8 @@ function LoadSkyFromModel(assetId)
     end)
 
     if not ok or type(roots) ~= "table" or #roots == 0 then
-        local sky, serverError = LoadSkyFromServer(assetId)
-        if sky then
-            return sky
-        end
-        if serverError then
-            return nil, serverError
-        end
-
-        ok = pcall(function()
-            roots = {game:GetService("InsertService"):LoadAsset(assetId)}
-        end)
-    end
-
-    if not ok or type(roots) ~= "table" or #roots == 0 then
-        return nil, "Can't load this skybox here. Import it once in Studio with DexiSkyImport.lua."
+        return nil, "Can't load skybox model " .. assetId
+            .. " (your executor has no game:GetObjects). Use the image IDs of its faces instead."
     end
 
     local result
@@ -4432,25 +4675,12 @@ function GetSkyAsset(raw)
         if text == "" then
             return "empty"
         end
-
-        -- Not an ID: maybe the name of a skybox in the DexiSkies library.
-        local named = FindLibrarySky(text)
-        if named then
-            return "ok", ReadSkyObject(named)
-        end
         return "invalid"
     end
 
     local assetId = tonumber(string.match(content, "^rbxassetid://(%d+)$"))
     if not assetId then
         return "ok", {Kind = "Image", Content = content} -- rbxasset:// path
-    end
-
-    -- The library is checked before the cache, so a skybox imported after
-    -- a failed attempt works right away.
-    local librarySky = FindLibrarySky(assetId)
-    if librarySky then
-        return "ok", ReadSkyObject(librarySky)
     end
 
     local cached = SkyAssetCache[assetId]
@@ -5707,7 +5937,10 @@ end
 function Panic()
     ResetFeatures()
 
-    MarkConfigDirty()
+    -- Not MarkConfigDirty: with Auto Save on, Panic would overwrite the
+    -- saved config with "everything off" (and now keep it after rejoining).
+    ConfigDirty = true
+    RefreshProfileStatus()
     if RefreshConfigUI then
         RefreshConfigUI()
     end
@@ -6898,6 +7131,7 @@ function UpdateSlow()
     SafeCall("Diagnostics", UpdateDiagnostics)
     SafeCall("ExtraOverlay", UpdateExtraOverlay)
     SafeCall("OtherPlayers", UpdateOtherPlayersVisibility)
+    SafeCall("Persist", FlushPersist)
     SkyStatusInfo.Text = "SKYBOX      " .. SkyboxStatus
 end
 
@@ -6981,6 +7215,9 @@ function Shutdown()
     end
     ShutdownDone = true
 
+    -- Auto-saved changes that are still waiting are written first.
+    SafeCall("Shutdown:Persist", FlushPersist, true)
+
     -- One last update with every feature off restores the game's own
     -- values through the managed properties and the caches.
     ResetFeatures()
@@ -7063,6 +7300,8 @@ UpdateSlow()
 SafeCall("Crosshair", UpdateCrosshair)
 SafeCall("FOVCircle", UpdateFOVCircle)
 SafeCall("LowHealth", UpdateLowHealth)
+
+LoadStoredProfiles()
 
 Notify(
     "Dexi Script",
