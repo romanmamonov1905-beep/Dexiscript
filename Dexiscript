@@ -1,7 +1,3 @@
---============================================================
--- DEXI SCRIPT (fixed)
---============================================================
-
 Players = game:GetService("Players")
 RunService = game:GetService("RunService")
 UIS = game:GetService("UserInputService")
