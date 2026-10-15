@@ -22,6 +22,7 @@ Camera = Workspace.CurrentCamera
 --============================================================
 -- PREVIOUS RUN / CONNECTIONS
 --============================================================
+
 -- A previous run of the script kept all of its connections and overrides
 -- alive after its GUI was destroyed, so both copies fought each other
 -- (and game skies it had stashed were lost). It is shut down first.
@@ -40,6 +41,7 @@ end
 --============================================================
 -- THEME
 --============================================================
+
 Theme = {
     Background = Color3.fromRGB(7, 5, 10),
     Window = Color3.fromRGB(12, 9, 17),
@@ -63,6 +65,7 @@ Theme = {
 --============================================================
 -- CONFIG
 --============================================================
+
 Config = {
     OpenKey = Enum.KeyCode.RightShift,
     PanicKey = Enum.KeyCode.End,
@@ -126,28 +129,13 @@ Config = {
     TeleportSafety = true,
 
     ESP = false,
-    ESPHighlight = true,
-    ESPFillTransparency = 0.65,
-    ESPBoxes = false,
-    ESPHealthBar = false,
     ESPNames = true,
-    ESPUseDisplayName = true,
-    ESPTeamName = false,
     ESPDistance = true,
     ESPHealth = true,
-    ESPSpeed = false,
-    ESPTool = false,
-    ESPStatus = false, -- DEAD / FF (spawn protection) / SEAT / AIR ...
-    ESPTextSize = 9,
     ESPTracers = false,
-    ESPTracerOrigin = "Bottom", -- "Bottom" | "Center" | "Top" | "Mouse"
-    ESPTracerThickness = 2,
     ESPTeamCheck = false,
-    ESPShowDead = true, -- dead players stay marked (dimmed) until they respawn
-    ESPNPCs = false, -- also bots, dummies and other NPCs
-    ESPColorMode = "Accent", -- "Accent" | "Team" | "Health" | "Visible"
-    ESPMarkTarget = false, -- selected / aimed target is drawn in yellow
     ESPMaxDistance = 2000,
+    ESPHighlight = true,
     RainbowESP = false,
     SelfChams = false,
     FOVCircle = true, -- shown while Aim Assist is on
@@ -303,12 +291,15 @@ Config = {
 --============================================================
 -- STATE
 --============================================================
+
 Character = nil
 Humanoid = nil
 Root = nil
+
 Gui = nil
 Main = nil
 UINotifications = nil
+
 CurrentTarget = nil
 RandomAimPartLock = nil
 RandomAimTargetPlayer = nil
@@ -319,8 +310,8 @@ DeleteConfirmUntil = 0
 DeleteConfirmName = nil
 ShutdownDone = false
 
--- ESP entries, keyed by Player (players) or Model (NPCs).
 ESP = {}
+Tracers = {}
 RadarDots = {}
 
 ExtraState = {
@@ -351,8 +342,10 @@ ExtraState = {
 FlyAttachment = nil
 FlyVelocity = nil
 FlyOrientation = nil
+
 SavedCollision = {}
 SavedTransparency = {}
+
 SkyboxForceRefresh = true
 SkyboxStatus = "OFF"
 CreatedSky = nil
@@ -376,6 +369,7 @@ DeletedParts = {}
 SelfTrail = nil
 LastWorldSweep = 0
 LastSoundSweep = 0
+
 Waypoints = {}
 
 FPS = 0
@@ -394,6 +388,7 @@ GlobalCaptureToken = 0
 --============================================================
 -- HELPERS
 --============================================================
+
 function safeUnit(vector)
     if vector.Magnitude > 0.0001 then
         return vector.Unit
@@ -530,6 +525,7 @@ end
 --============================================================
 -- NOTIFICATIONS
 --============================================================
+
 NotificationOrder = 0
 
 function Notify(title, message, duration)
@@ -605,6 +601,7 @@ end
 -- (writefile / readfile), so they survive rejoining and stay on this PC.
 -- Without a file API they only last until you leave.
 --============================================================
+
 Profiles = {}
 CurrentProfileName = "Default"
 ConfigDirty = false
@@ -842,6 +839,7 @@ end
 --============================================================
 -- CONFIG STORAGE (keeps saved configs between joins)
 --============================================================
+
 -- Runtime-only toggles that make no sense right after joining (there is
 -- no target selected yet), so they are never restored from storage.
 TransientConfigKeys = {
@@ -1147,6 +1145,7 @@ end
 --============================================================
 -- GUI ROOT
 --============================================================
+
 -- Remove a GUI left over from a previous run of the script.
 for _, name in ipairs({"DexiScript", "DexiToggle"}) do
     local old = PlayerGui:FindFirstChild(name)
@@ -1175,6 +1174,7 @@ ToggleGui.Parent = PlayerGui
 --============================================================
 -- DEVICE DETECTION
 --============================================================
+
 DeviceMode = "PC"
 IsTouchDevice = false
 IsKeyboardDevice = false
@@ -1293,6 +1293,7 @@ LowHealthLabel.Parent = Gui
 --============================================================
 -- MAIN WINDOW
 --============================================================
+
 Main = Instance.new("Frame")
 Main.Name = "Main"
 Main.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1349,6 +1350,7 @@ ApplyDeviceScale()
 --============================================================
 -- TOP BAR
 --============================================================
+
 TopBar = Instance.new("Frame")
 TopBar.Name = "TopBar"
 TopBar.Size = UDim2.new(1, 0, 0, 49)
@@ -1490,6 +1492,7 @@ MenuToggleButton.MouseButton1Click:Connect(ToggleMenu)
 --============================================================
 -- DRAGGING
 --============================================================
+
 dragging = false
 dragStart = nil
 dragOriginal = nil
@@ -1538,6 +1541,7 @@ end))
 --============================================================
 -- SIDEBAR / PAGES
 --============================================================
+
 Sidebar = Instance.new("Frame")
 Sidebar.Name = "Sidebar"
 Sidebar.Position = UDim2.fromOffset(9, 58)
@@ -1675,15 +1679,15 @@ function CreateTab(text, pageName)
     Tabs[pageName] = tab
 end
 
-CreateTab("[H] Home", "Home")
-CreateTab("[M] Movement", "Movement")
-CreateTab("[V] Visuals", "Visuals")
-CreateTab("[A] Aim", "Aim")
-CreateTab("[C] Camera", "Camera")
-CreateTab("[P] Player", "Player")
-CreateTab("[X] Physics", "Physics")
-CreateTab("[D] Debug", "Debug")
-CreateTab("[S] Settings", "Settings")
+CreateTab("[H]  Home", "Home")
+CreateTab("[M]  Movement", "Movement")
+CreateTab("[V]  Visuals", "Visuals")
+CreateTab("[A]  Aim", "Aim")
+CreateTab("[C]  Camera", "Camera")
+CreateTab("[P]  Player", "Player")
+CreateTab("[X]  Physics", "Physics")
+CreateTab("[D]  Debug", "Debug")
+CreateTab("[S]  Settings", "Settings")
 
 function ApplyCompactMode()
     local padding = Config.CompactMode and 3 or 7
@@ -1749,6 +1753,7 @@ end))
 --============================================================
 -- UI HELPERS
 --============================================================
+
 function Section(page, text)
     local label = Instance.new("TextLabel")
     label.Name = "Section"
@@ -2257,6 +2262,7 @@ end
 --============================================================
 -- SHARED ACTIONS
 --============================================================
+
 function ResetCharacter()
     if Humanoid then
         Humanoid.Health = 0
@@ -2304,21 +2310,21 @@ end
 --============================================================
 -- HOME
 --============================================================
-Section(HomePage, "Overview")
 
+Section(HomePage, "Overview")
 HomeInfo = InfoBox(
     HomePage,
-    "USER    " .. LocalPlayer.DisplayName
-        .. "\nFPS     0"
-        .. "\nPING    --"
-        .. "\nPLAYERS " .. tostring(#Players:GetPlayers()),
+    "USER       " .. LocalPlayer.DisplayName
+        .. "\nFPS        0"
+        .. "\nPING       --"
+        .. "\nPLAYERS    " .. tostring(#Players:GetPlayers()),
     72
 )
 
 Section(HomePage, "Quick Actions")
 Button(HomePage, "[RESET]  Reset Character", ResetCharacter)
 Button(HomePage, "[SPAWN]  Teleport To Spawn", TeleportToSpawn)
-Button(HomePage, "[REJOIN] Rejoin Server", RejoinServer)
+Button(HomePage, "[REJOIN]  Rejoin Server", RejoinServer)
 
 Section(HomePage, "Active Features")
 ActiveInfo = InfoBox(HomePage, "No features currently active.", 100)
@@ -2329,6 +2335,7 @@ ActiveInfo.AutomaticSize = Enum.AutomaticSize.Y
 --============================================================
 -- MOVEMENT
 --============================================================
+
 Section(MovementPage, "Core Movement")
 
 -- Moving a slider switches its "Custom" toggle on.
@@ -2358,7 +2365,6 @@ ConfigToggle(MovementPage, "Fly", "Fly")
 Slider(MovementPage, "Fly Speed", 20, 250, "FlySpeed")
 Slider(MovementPage, "Fly Vertical Speed", 20, 200, "FlyVerticalSpeed")
 ConfigToggle(MovementPage, "Fly Face Camera", "FlyFaceCamera")
-
 ConfigToggle(MovementPage, "Noclip", "Noclip")
 ConfigToggle(MovementPage, "Infinite Jump", "InfiniteJump")
 ConfigToggle(MovementPage, "Bunny Hop", "BunnyHop")
@@ -2370,12 +2376,14 @@ ConfigToggle(MovementPage, "Glide", "Glide")
 ConfigToggle(MovementPage, "Hover", "Hover")
 
 Section(MovementPage, "Advanced Movement")
+
 ConfigToggle(MovementPage, "Sprint Key (Hold Shift)", "SprintKey")
 Slider(MovementPage, "Sprint Speed", 16, 150, "SprintSpeed")
 ConfigToggle(MovementPage, "Edge Jump", "EdgeJump")
 ConfigToggle(MovementPage, "Click Teleport", "ClickTeleport")
 
 Section(MovementPage, "Movement Extras")
+
 ConfigToggle(MovementPage, "Crouch", "Crouch")
 ConfigToggle(MovementPage, "Crouch Camera", "CrouchCamera")
 Slider(MovementPage, "Crouch Offset", -2, 1, "CrouchOffset")
@@ -2398,41 +2406,21 @@ ConfigToggle(MovementPage, "Auto Walk", "AutoWalk")
 --============================================================
 -- VISUALS
 --============================================================
--- The labels of the old ESP toggles are unchanged, so keybinds saved for
--- them keep working.
+
 Section(VisualsPage, "ESP")
+
 ConfigToggle(VisualsPage, "Player ESP", "ESP")
-ConfigToggle(VisualsPage, "NPC / Bot ESP", "ESPNPCs")
-ConfigToggle(VisualsPage, "Team Check", "ESPTeamCheck")
-ConfigToggle(VisualsPage, "Show Dead Players", "ESPShowDead")
-Slider(VisualsPage, "ESP Max Distance", 100, 5000, "ESPMaxDistance")
-
-Section(VisualsPage, "ESP Elements")
 ConfigToggle(VisualsPage, "ESP Highlight", "ESPHighlight")
-Slider(VisualsPage, "Highlight Fill Transparency", 0, 1, "ESPFillTransparency")
-ConfigToggle(VisualsPage, "Boxes", "ESPBoxes")
-ConfigToggle(VisualsPage, "Health Bar", "ESPHealthBar")
-ConfigToggle(VisualsPage, "Tracers", "ESPTracers")
-Dropdown(VisualsPage, "Tracer Origin", {"Bottom", "Center", "Top", "Mouse"}, "ESPTracerOrigin")
-Slider(VisualsPage, "Tracer Thickness", 1, 5, "ESPTracerThickness", nil, 0.5)
-
-Section(VisualsPage, "ESP Info")
 ConfigToggle(VisualsPage, "Names", "ESPNames")
-ConfigToggle(VisualsPage, "Use Display Name", "ESPUseDisplayName")
-ConfigToggle(VisualsPage, "Team Name", "ESPTeamName")
 ConfigToggle(VisualsPage, "Distance", "ESPDistance")
 ConfigToggle(VisualsPage, "Health", "ESPHealth")
-ConfigToggle(VisualsPage, "Speed", "ESPSpeed")
-ConfigToggle(VisualsPage, "Held Tool", "ESPTool")
-ConfigToggle(VisualsPage, "Status (Dead / FF / Seat / Air)", "ESPStatus")
-Slider(VisualsPage, "ESP Text Size", 7, 16, "ESPTextSize", nil, 1)
-
-Section(VisualsPage, "ESP Colors")
-Dropdown(VisualsPage, "Color Mode", {"Accent", "Team", "Health", "Visible"}, "ESPColorMode")
+ConfigToggle(VisualsPage, "Tracers", "ESPTracers")
+ConfigToggle(VisualsPage, "Team Check", "ESPTeamCheck")
 ConfigToggle(VisualsPage, "Rainbow ESP", "RainbowESP")
-ConfigToggle(VisualsPage, "Mark Selected / Aim Target", "ESPMarkTarget")
+Slider(VisualsPage, "ESP Max Distance", 100, 5000, "ESPMaxDistance")
 
 Section(VisualsPage, "Environment")
+
 ConfigToggle(VisualsPage, "Fullbright", "Fullbright")
 ConfigToggle(VisualsPage, "Remove Fog", "RemoveFog")
 ConfigToggle(VisualsPage, "Custom Time", "CustomTime")
@@ -2440,6 +2428,7 @@ Slider(VisualsPage, "Time Of Day", 0, 24, "TimeOfDay", nil, 0.5)
 Slider(VisualsPage, "Brightness (Fullbright)", 0, 5, "LightingBrightness")
 
 Section(VisualsPage, "Local Skybox")
+
 ConfigToggle(VisualsPage, "Local Skybox", "LocalSkybox", function()
     SkyboxForceRefresh = true
 end)
@@ -2519,12 +2508,13 @@ end
 
 TextInput(VisualsPage, "SKY ID", "Image / Decal / Skybox model ID or link", "SkyDecalId", SkyChanged)
 
-SkyStatusInfo = InfoBox(VisualsPage, "SKYBOX  OFF", 44)
+SkyStatusInfo = InfoBox(VisualsPage, "SKYBOX      OFF", 44)
 SkyStatusInfo.TextWrapped = true
 
 ConfigToggle(VisualsPage, "Hide Sun / Moon", "HideCelestialBodies")
 
 Section(VisualsPage, "Sky Faces (optional, override Sky ID)")
+
 TextInput(VisualsPage, "UP", "Image / Decal ID", "SkyFaceUp", SkyChanged)
 TextInput(VisualsPage, "DOWN", "Image / Decal ID", "SkyFaceDn", SkyChanged)
 TextInput(VisualsPage, "FRONT", "Image / Decal ID", "SkyFaceFt", SkyChanged)
@@ -2533,6 +2523,7 @@ TextInput(VisualsPage, "LEFT", "Image / Decal ID", "SkyFaceLf", SkyChanged)
 TextInput(VisualsPage, "RIGHT", "Image / Decal ID", "SkyFaceRt", SkyChanged)
 
 Section(VisualsPage, "Sun / Moon / Stars")
+
 ConfigToggle(VisualsPage, "Custom Sun / Moon / Stars", "SkyCustomCelestial", function()
     SkyboxForceRefresh = true
 end)
@@ -2543,7 +2534,7 @@ Slider(VisualsPage, "Sun Size", 0, 60, "SkySunSize")
 Slider(VisualsPage, "Moon Size", 0, 60, "SkyMoonSize")
 Slider(VisualsPage, "Sky Rotation", 0, 360, "SkyRotation")
 
-Button(VisualsPage, "[CLEAR] Clear Sky Fields", function()
+Button(VisualsPage, "[CLEAR]  Clear Sky Fields", function()
     Config.SkyDecalId = ""
     for _, key in pairs(SkyFaceConfigKeys) do
         Config[key] = ""
@@ -2560,6 +2551,7 @@ Button(VisualsPage, "[CLEAR] Clear Sky Fields", function()
 end)
 
 Section(VisualsPage, "Extra Visuals")
+
 ConfigToggle(VisualsPage, "Self Chams", "SelfChams")
 ConfigToggle(VisualsPage, "Low Health Warning", "LowHealthWarning")
 ConfigToggle(VisualsPage, "Night Vision", "NightVision")
@@ -2570,12 +2562,14 @@ ConfigToggle(VisualsPage, "Low Graphics (FPS Boost)", "LowGraphics", function()
 end)
 
 Section(VisualsPage, "Crosshair")
+
 ConfigToggle(VisualsPage, "Crosshair", "Crosshair")
 Slider(VisualsPage, "Crosshair Size", 3, 20, "CrosshairSize")
 Slider(VisualsPage, "Crosshair Gap", 0, 15, "CrosshairGap")
 Slider(VisualsPage, "Crosshair Thickness", 1, 6, "CrosshairThickness", nil, 1)
 
 Section(VisualsPage, "Render Controls")
+
 ConfigToggle(VisualsPage, "Head Dots", "HeadDots")
 ConfigToggle(VisualsPage, "Rainbow Crosshair", "RainbowCrosshair")
 ConfigToggle(VisualsPage, "Screen Tint", "ScreenTint")
@@ -2587,6 +2581,7 @@ ConfigToggle(VisualsPage, "Remove Trails", "RemoveTrails")
 ConfigToggle(VisualsPage, "Disable Post FX", "DisablePostFX")
 
 Section(VisualsPage, "World Tools")
+
 ConfigToggle(VisualsPage, "X-Ray (World)", "XRay", function()
     LastWorldSweep = 0
 end)
@@ -2599,7 +2594,9 @@ ConfigToggle(VisualsPage, "Self Trail", "SelfTrail")
 --============================================================
 -- AIM
 --============================================================
+
 Section(AimPage, "Aim Assist")
+
 ConfigToggle(AimPage, "Aim Assist", "AimAssist")
 ConfigToggle(AimPage, "Hold Activation", "AimHold")
 ConfigToggle(AimPage, "Sticky Target", "AimSticky")
@@ -2666,14 +2663,16 @@ function BeginGlobalCapture(target, button, pressText)
     end
 end
 
-AimKeyButton = Button(AimPage, "[KEY] Aim Key: " .. KeyName(Config.AimKey), function()
-    BeginGlobalCapture("AimKey", AimKeyButton, "[KEY] Aim Key: PRESS")
+AimKeyButton = Button(AimPage, "[KEY]  Aim Key: " .. KeyName(Config.AimKey), function()
+    BeginGlobalCapture("AimKey", AimKeyButton, "[KEY]  Aim Key: PRESS")
 end)
 
 --============================================================
 -- CAMERA
 --============================================================
+
 Section(CameraPage, "Camera")
+
 Slider(CameraPage, "FOV", 40, 120, "FOV")
 ConfigToggle(CameraPage, "Third Person", "ThirdPerson")
 Slider(CameraPage, "Camera Distance", 3, 30, "CameraDistance")
@@ -2689,6 +2688,7 @@ ConfigToggle(CameraPage, "Camera Tilt", "CameraTilt")
 Slider(CameraPage, "Camera Tilt Strength", 0, 10, "CameraTiltStrength")
 
 Section(CameraPage, "Camera Extras")
+
 ConfigToggle(CameraPage, "Lock First Person", "LockFirstPerson")
 ConfigToggle(CameraPage, "Shoulder Camera", "ShoulderCamera")
 Slider(CameraPage, "Shoulder Offset", -5, 5, "ShoulderOffset")
@@ -2703,7 +2703,9 @@ Slider(CameraPage, "Zoom Key FOV", 5, 60, "ZoomKeyFOV")
 --============================================================
 -- PLAYER
 --============================================================
+
 Section(PlayerPage, "Utilities")
+
 ConfigToggle(PlayerPage, "Anti-AFK", "AntiAFK")
 ConfigToggle(PlayerPage, "Anti-Void", "AntiVoid")
 Slider(PlayerPage, "Anti-Void Height", -500, 50, "AntiVoidHeight")
@@ -2722,17 +2724,19 @@ Dropdown(PlayerPage, "Respawn Point", {"Default", "Spawn", "Death Point"}, "Resp
 Slider(PlayerPage, "Animation Speed", 0, 3, "AnimationSpeed")
 
 Section(PlayerPage, "Character Info")
+
 CharacterInfo = InfoBox(
     PlayerPage,
-    "PLAYER    " .. LocalPlayer.Name
-        .. "\nHEALTH    --"
-        .. "\nSPEED     --"
-        .. "\nPOSITION  --"
-        .. "\nVELOCITY  --",
+    "PLAYER      " .. LocalPlayer.Name
+        .. "\nHEALTH      --"
+        .. "\nSPEED       --"
+        .. "\nPOSITION    --"
+        .. "\nVELOCITY    --",
     145
 )
 
 Section(PlayerPage, "Waypoints")
+
 WaypointInfo = InfoBox(PlayerPage, "", 110)
 
 for index = 1, 5 do
@@ -2755,6 +2759,7 @@ for index = 1, 5 do
 end
 
 Section(PlayerPage, "Quality of Life")
+
 ConfigToggle(PlayerPage, "Anti-Seat", "AntiSeat")
 ConfigToggle(PlayerPage, "Auto Unequip Tools", "AutoUnequipTools")
 ConfigToggle(PlayerPage, "Reset Camera On Respawn", "ResetOnRespawnCamera")
@@ -2763,10 +2768,12 @@ ConfigToggle(PlayerPage, "Hide Other Players", "HideOtherPlayers")
 ConfigToggle(PlayerPage, "Hide Nametags", "HideNametags")
 
 Section(PlayerPage, "Target Player")
-table.insert(TargetButtons, Button(PlayerPage, "[TARGET] No target selected", function()
+
+table.insert(TargetButtons, Button(PlayerPage, "[TARGET]  No target selected", function()
     OpenTargetMenu()
 end))
-Button(PlayerPage, "[TP] Teleport To Target", function()
+
+Button(PlayerPage, "[TP]  Teleport To Target", function()
     TeleportToTarget()
 end)
 
@@ -2786,6 +2793,7 @@ Slider(PlayerPage, "Follow Distance", 2, 20, "FollowDistance")
 --============================================================
 -- TARGET SELECTION / LOCAL TARGET PHYSICS
 --============================================================
+
 TargetMenu = nil
 TargetButton = nil
 
@@ -2969,13 +2977,15 @@ end
 --============================================================
 -- PHYSICS
 --============================================================
+
 Section(PhysicsPage, "Spin / Launch")
+
 ConfigToggle(PhysicsPage, "Spin Bot (Local)", "SpinBot")
 Slider(PhysicsPage, "Spin Speed", 1, 30, "SpinSpeed")
 ConfigToggle(PhysicsPage, "Touch Boost (Self)", "TouchBoost")
 Slider(PhysicsPage, "Touch Boost Power", 20, 250, "TouchBoostPower")
 
-Button(PhysicsPage, "[FLING] Self Fling", function()
+Button(PhysicsPage, "[FLING]  Self Fling", function()
     local cam = getCamera()
     if Root and cam then
         Root.AssemblyLinearVelocity = cam.CFrame.LookVector * 100 + Vector3.new(0, 90, 0)
@@ -3148,7 +3158,7 @@ end
 
 function SetTargetButtonsText()
     for _, button in ipairs(TargetButtons) do
-        button.Text = "[TARGET] " .. SelectedTargetText()
+        button.Text = "[TARGET]  " .. SelectedTargetText()
     end
 end
 
@@ -3160,7 +3170,7 @@ function OpenTargetMenu()
     end
 end
 
-TargetButton = Button(PhysicsPage, "[TARGET] No target selected", function()
+TargetButton = Button(PhysicsPage, "[TARGET]  No target selected", function()
     OpenTargetMenu()
 end)
 table.insert(TargetButtons, TargetButton)
@@ -3190,7 +3200,9 @@ Slider(PhysicsPage, "Touch Fling Power", 20, 400, "TouchFlingPower")
 --============================================================
 -- DEBUG
 --============================================================
+
 Section(DebugPage, "Overlay")
+
 ConfigToggle(DebugPage, "FPS", "ShowFPS")
 ConfigToggle(DebugPage, "Ping", "ShowPing")
 ConfigToggle(DebugPage, "Position", "ShowPosition")
@@ -3200,10 +3212,12 @@ ConfigToggle(DebugPage, "Humanoid State", "ShowState")
 DebugInfo = InfoBox(DebugPage, "", 190)
 
 Section(DebugPage, "Radar")
+
 ConfigToggle(DebugPage, "Radar", "Radar")
 Slider(DebugPage, "Radar Range", 50, 1000, "RadarRange")
 
 Section(DebugPage, "Status Overlay")
+
 ConfigToggle(DebugPage, "Clock Overlay", "ClockOverlay")
 ConfigToggle(DebugPage, "Session Timer", "SessionTimer")
 ConfigToggle(DebugPage, "Player Count Overlay", "PlayerCountOverlay")
@@ -3212,6 +3226,7 @@ ConfigToggle(DebugPage, "Death Counter Overlay", "DeathCounterOverlay")
 ConfigToggle(DebugPage, "Tool Info Overlay", "ToolInfoOverlay")
 
 Section(DebugPage, "Diagnostics")
+
 ConfigToggle(DebugPage, "Job ID", "JobIdOverlay")
 ConfigToggle(DebugPage, "Place ID", "PlaceIdOverlay")
 ConfigToggle(DebugPage, "User ID", "UserIdOverlay")
@@ -3219,8 +3234,9 @@ ConfigToggle(DebugPage, "Server Age", "ServerAgeOverlay")
 ConfigToggle(DebugPage, "Input Mode", "InputModeOverlay")
 
 Section(DebugPage, "Tools (Local)")
+
 ConfigToggle(DebugPage, "Click Delete (Ctrl+Click)", "ClickDelete")
-Button(DebugPage, "[UNDO] Restore Deleted Parts", function()
+Button(DebugPage, "[UNDO]  Restore Deleted Parts", function()
     RestoreDeletedParts()
 end)
 ConfigToggle(DebugPage, "Part Inspector", "PartInspector")
@@ -3228,25 +3244,26 @@ ConfigToggle(DebugPage, "Part Inspector", "PartInspector")
 --============================================================
 -- SETTINGS
 --============================================================
+
 Section(SettingsPage, "Keybinds")
 
-OpenKeyButton = Button(SettingsPage, "[KEY] Open Key: " .. KeyName(Config.OpenKey), function()
-    BeginGlobalCapture("OpenKey", OpenKeyButton, "[KEY] Open Key: PRESS")
+OpenKeyButton = Button(SettingsPage, "[KEY]  Open Key: " .. KeyName(Config.OpenKey), function()
+    BeginGlobalCapture("OpenKey", OpenKeyButton, "[KEY]  Open Key: PRESS")
 end)
 
-PanicKeyButton = Button(SettingsPage, "[PANIC] Panic Key: " .. KeyName(Config.PanicKey), function()
-    BeginGlobalCapture("PanicKey", PanicKeyButton, "[PANIC] Panic Key: PRESS")
+PanicKeyButton = Button(SettingsPage, "[PANIC]  Panic Key: " .. KeyName(Config.PanicKey), function()
+    BeginGlobalCapture("PanicKey", PanicKeyButton, "[PANIC]  Panic Key: PRESS")
 end)
 
 function RefreshKeyButtons()
     if OpenKeyButton then
-        OpenKeyButton.Text = "[KEY] Open Key: " .. KeyName(Config.OpenKey)
+        OpenKeyButton.Text = "[KEY]  Open Key: " .. KeyName(Config.OpenKey)
     end
     if PanicKeyButton then
-        PanicKeyButton.Text = "[PANIC] Panic Key: " .. KeyName(Config.PanicKey)
+        PanicKeyButton.Text = "[PANIC]  Panic Key: " .. KeyName(Config.PanicKey)
     end
     if AimKeyButton then
-        AimKeyButton.Text = "[KEY] Aim Key: " .. KeyName(Config.AimKey)
+        AimKeyButton.Text = "[KEY]  Aim Key: " .. KeyName(Config.AimKey)
     end
 end
 
@@ -3266,18 +3283,18 @@ ConfigToggle(SettingsPage, "Compact Mode", "CompactMode", function()
     ApplyCompactMode()
 end)
 
-Button(SettingsPage, "[HIDE] Hide Dexi", function()
+Button(SettingsPage, "[HIDE]  Hide Dexi", function()
     HideMenu()
     if IsKeyboardDevice then
         Notify("Dexi", "Press " .. KeyName(Config.OpenKey) .. " to open again.", 3)
     end
 end)
 
-Button(SettingsPage, "[UNLOAD] Unload Dexi", function()
+Button(SettingsPage, "[UNLOAD]  Unload Dexi", function()
     Shutdown()
 end)
 
-Button(SettingsPage, "[RESET] Reset Main Settings", function()
+Button(SettingsPage, "[RESET]  Reset Main Settings", function()
     Config.WalkSpeed = 50
     Config.JumpPower = 100
     Config.FlySpeed = 75
@@ -3300,11 +3317,12 @@ end)
 --============================================================
 -- SIMPLE CONFIGS
 --============================================================
+
 Section(SettingsPage, "Configs")
 
 ProfileStatus = InfoBox(
     SettingsPage,
-    "CONFIG  Default\nSTATE   Saved\nCOUNT   1\nSTORAGE Checking...",
+    "CONFIG      Default\nSTATE       Saved\nCOUNT       1\nSTORAGE     Checking...",
     72
 )
 
@@ -3461,13 +3479,10 @@ end
 ConfigActionButton(ConfigActionRow, "LOAD", function()
     LoadProfile(CurrentProfileName)
 end, 1)
-
 ConfigActionButton(ConfigActionRow, "DELETE", DeleteCurrentProfile, 2)
-
 ConfigActionButton(ConfigActionRow, "RENAME", function()
     RenameCurrentProfile(ProfileNameBox.Text)
 end, 3)
-
 ConfigActionButton(ConfigActionRow, "SAVE", SaveCurrentProfile, 4)
 
 ConfigToggle(SettingsPage, "Auto Save Config", "AutoSaveProfile")
@@ -3483,10 +3498,10 @@ StorageLabels = {
 function RefreshProfileStatus()
     if ProfileStatus then
         ProfileStatus.Text =
-            "CONFIG  " .. CurrentProfileName
-            .. "\nSTATE   " .. (ConfigDirty and "Changed" or "Saved")
-            .. "\nCOUNT   " .. tostring(#ConfigNames())
-            .. "\nSTORAGE " .. (StorageLabels[StorageMode] or StorageMode)
+            "CONFIG      " .. CurrentProfileName
+            .. "\nSTATE       " .. (ConfigDirty and "Changed" or "Saved")
+            .. "\nCOUNT       " .. tostring(#ConfigNames())
+            .. "\nSTORAGE     " .. (StorageLabels[StorageMode] or StorageMode)
     end
 end
 
@@ -3574,6 +3589,7 @@ UpdateProfileUI()
 --============================================================
 -- CROSSHAIR
 --============================================================
+
 CrosshairGui = Instance.new("Frame")
 CrosshairGui.Name = "Crosshair"
 CrosshairGui.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -3630,657 +3646,301 @@ end
 
 --============================================================
 -- ESP
--- Rebuilt from the current state 10 times per second (who is in the
--- server, which character they have now, alive or dead) and drawn every
--- frame. Fixes compared to the old ESP:
---  * The info text was a BillboardGui inside the enemy's Head. When the
---    game removed or replaced body parts on death / respawn, the text was
---    left on a part outside Workspace and never came back. Names, info,
---    boxes, health bars and tracers are now drawn on the script's own
---    ScreenGui; only the Highlight lives in the character, and it is
---    rebuilt whenever it is missing or belongs to an old character.
---  * One broken character stopped the ESP of every player after it in
---    the list (one SafeCall around the whole loop).
---  * Dead players can stay marked (grey, "DEAD") until they respawn.
---  * Tracers vanished while you were dead (they needed your own Root).
---  * The highlight was shown even when the target had no body part, and
---    the text used the camera distance while the highlight used yours.
---  * Roblox draws at most 31 Highlights: the nearest players get them.
---  * Rainbow colors changed only 10 times per second.
 --============================================================
-ESPLayer = Instance.new("Frame")
-ESPLayer.Name = "ESP"
-ESPLayer.Size = UDim2.fromScale(1, 1)
-ESPLayer.BackgroundTransparency = 1
-ESPLayer.ZIndex = 2
-ESPLayer.Parent = Gui
-
-ESPHighlightLimit = 30
--- Only the nearest NPCs are shown, so maps with hundreds of bots stay fast.
-ESPNPCLimit = 40
--- Same purple look as the rest of the script.
-ESPDeadColor = Theme.Muted
-ESPTargetColor = Theme.Yellow
 
 function IsTeamBlocked(player)
     return Config.ESPTeamCheck and SameTeam(LocalPlayer, player)
 end
 
-function HealthColor(fraction)
-    fraction = math.clamp(fraction, 0, 1)
-    if fraction < 0.5 then
-        return Theme.Red:Lerp(Theme.Yellow, fraction * 2)
-    end
-    return Theme.Yellow:Lerp(Theme.Green, (fraction - 0.5) * 2)
-end
-
-function FormatHealth(value)
-    if value ~= value then -- NaN
-        return "?"
-    end
-    if value == math.huge then
-        return "inf"
-    end
-    -- Rounded up, so a player with 0.4 HP left is not shown as 0.
-    return tostring(math.ceil(value))
-end
-
--- True for models that are (or are inside) a player's character: pets,
--- mounts or tools with a Humanoid are not NPCs.
-function IsInsidePlayerCharacter(model)
-    local current = model
-    while current and current ~= Workspace do
-        if current:IsA("Model") and Players:GetPlayerFromCharacter(current) then
-            return true
-        end
-        current = current.Parent
-    end
-    return false
-end
-
-function DestroyESPHighlight(data)
-    if data.Highlight then
-        local highlight = data.Highlight
-        data.Highlight = nil
-        pcall(function()
-            highlight:Destroy()
-        end)
-    end
-end
-
-function RemoveESP(key)
-    local data = ESP[key]
+function DestroyESPObjects(data)
     if not data then
         return
     end
 
-    DestroyESPHighlight(data)
-    if data.Container then
-        data.Container:Destroy()
+    if data.Highlight then
+        data.Highlight:Destroy()
+        data.Highlight = nil
     end
-    ESP[key] = nil
+
+    if data.Billboard then
+        data.Billboard:Destroy()
+        data.Billboard = nil
+        data.Info = nil
+    end
 end
 
-function ClearESP()
-    for key in pairs(ESP) do
-        RemoveESP(key)
-    end
+function GetESPAnchor(character)
+    return character:FindFirstChild("Head")
+        or character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChildWhichIsA("BasePart")
 end
 
-
--- 2D parts of one entry. They share one container, so hiding or removing
--- an entry is a single operation.
-function EnsureESPVisuals(data)
-    if data.Container and data.Container.Parent == ESPLayer then
-        return
-    end
-    if data.Container then
-        data.Container:Destroy()
-    end
-
-    local container = Instance.new("Frame")
-    container.Name = "Entry"
-    container.Size = UDim2.fromScale(1, 1)
-    container.BackgroundTransparency = 1
-    container.Visible = false
-    container.Parent = ESPLayer
-
-    local tracer = Instance.new("Frame")
-    tracer.Name = "Tracer"
-    -- Frames rotate around their center, so the line sits at the midpoint.
-    tracer.AnchorPoint = Vector2.new(0.5, 0.5)
-    tracer.BorderSizePixel = 0
-    tracer.Visible = false
-    tracer.Parent = container
-
-    -- Simple thin outline, like the crosshair and FOV circle.
-    local box = Instance.new("Frame")
-    box.Name = "Box"
-    box.BackgroundTransparency = 1
-    box.Visible = false
-    box.Parent = container
-
-    local boxStroke = Instance.new("UIStroke")
-    boxStroke.Thickness = 1
-    boxStroke.Parent = box
-
-    local healthBar = Instance.new("Frame")
-    healthBar.Name = "HealthBar"
-    healthBar.AnchorPoint = Vector2.new(1, 0)
-    healthBar.BackgroundColor3 = Theme.Background
-    healthBar.BackgroundTransparency = 0.2
-    healthBar.BorderSizePixel = 0
-    healthBar.Visible = false
-    healthBar.Parent = container
-
-    local healthFill = Instance.new("Frame")
-    healthFill.Name = "Fill"
-    healthFill.AnchorPoint = Vector2.new(0.5, 1)
-    healthFill.Position = UDim2.new(0.5, 0, 1, -1)
-    healthFill.BorderSizePixel = 0
-    healthFill.Parent = healthBar
-
-    -- Same text as the old ESP: white, bold, one item per line, above the head.
-    local info = Instance.new("TextLabel")
-    info.Name = "Info"
-    info.AnchorPoint = Vector2.new(0.5, 1)
-    info.Size = UDim2.fromOffset(160, 14)
-    info.BackgroundTransparency = 1
-    info.TextColor3 = Theme.Text
-    info.TextStrokeColor3 = Color3.new(0, 0, 0)
-    info.TextStrokeTransparency = 0.2
-    info.Font = Enum.Font.GothamBold
-    info.TextSize = Config.ESPTextSize
-    info.TextYAlignment = Enum.TextYAlignment.Bottom
-    info.Parent = container
-
-    data.Container = container
-    data.Tracer = tracer
-    data.Box = box
-    data.BoxStroke = boxStroke
-    data.HealthBar = healthBar
-    data.HealthFill = healthFill
-    data.InfoLabel = info
-end
-
-function EnsureESPHighlight(data)
-    local model = data.Model
-    local highlight = data.Highlight
-
-    -- Destroyed together with an old character, removed by a game script,
-    -- or moved somewhere else: build a fresh one.
-    if highlight and (highlight.Parent ~= model or highlight.Adornee ~= model) then
-        DestroyESPHighlight(data)
-        highlight = nil
-    end
-
-    if not highlight then
-        highlight = Instance.new("Highlight")
-        highlight.Name = "DexiESP"
-        highlight.Enabled = false -- turned on below, nearest first
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.OutlineTransparency = 0
-        highlight.Adornee = model
-
-        local ok = pcall(function()
-            highlight.Parent = model
-        end)
-        if not ok then
-            -- The model is being destroyed (Parent locked).
-            highlight:Destroy()
-            return
-        end
-
-        data.Highlight = highlight
-        data.HighlightBorn = os.clock()
-        data.HighlightRefreshed = false
-    elseif not data.HighlightRefreshed and os.clock() - data.HighlightBorn > 1.5 then
-        -- Body parts and accessories that load after the Highlight was made
-        -- were sometimes left out; adorning it again once picks them up.
-        data.HighlightRefreshed = true
-        highlight.Adornee = nil
-        highlight.Adornee = model
-    end
-
-    highlight.FillTransparency = Config.ESPFillTransparency
-end
-
-function GetESPStatus(model, humanoid, alive)
-    if not alive then
-        return "DEAD"
-    end
-
-    local tags = {}
-
-    if model:FindFirstChildOfClass("ForceField") then
-        table.insert(tags, "FF") -- spawn protection
-    end
-
-    if humanoid then
-        if humanoid.Sit then
-            table.insert(tags, "SEAT")
-        end
-
-        local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Swimming then
-            table.insert(tags, "SWIM")
-        elseif state == Enum.HumanoidStateType.Climbing then
-            table.insert(tags, "CLIMB")
-        elseif state == Enum.HumanoidStateType.Freefall
-            or state == Enum.HumanoidStateType.Jumping
-        then
-            table.insert(tags, "AIR")
-        elseif state == Enum.HumanoidStateType.Ragdoll
-            or state == Enum.HumanoidStateType.FallingDown
-            or state == Enum.HumanoidStateType.PlatformStanding
-        then
-            table.insert(tags, "DOWN")
-        end
-    end
-
-    return table.concat(tags, " ")
-end
-
--- Reads one player / NPC and prepares everything the renderer needs.
--- The entry is always looked up again from the current character, so a
--- respawn is picked up within 0.1 s no matter how the game handles it.
-function RefreshESPEntry(key, player, model, origin)
-    local data = ESP[key]
+function GetESPData(player)
+    local data = ESP[player]
     if not data then
         data = {}
-        ESP[key] = data
+        ESP[player] = data
+    end
+    return data
+end
+
+function EnsureESPObjects(player, character)
+    if player == LocalPlayer or not character then
+        return nil
     end
 
-    data.Seen = true
-    data.Player = player
-    data.IsNPC = player == nil
-    data.Shown = false
+    local data = GetESPData(player)
 
-    -- New character (respawn) or no character at all: the old highlight
-    -- belongs to a model that is gone or about to go.
-    if data.Model ~= model then
-        DestroyESPHighlight(data)
-        data.Model = model
+    if data.Character ~= character then
+        DestroyESPObjects(data)
+        data.Character = character
     end
 
-    if not model or not model:IsDescendantOf(Workspace) then
+    if not data.Highlight or not data.Highlight.Parent then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "DexiESP"
+        highlight.Enabled = false -- shown by UpdateESP only when ESP is on
+        highlight.FillColor = Theme.Accent
+        highlight.OutlineColor = Theme.Accent2
+        highlight.FillTransparency = 0.65
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Adornee = character
+        highlight.Parent = character
+        data.Highlight = highlight
+    end
+
+    local anchor = GetESPAnchor(character)
+
+    if anchor and (not data.Billboard or not data.Billboard.Parent) then
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "DexiInfo"
+        billboard.Size = UDim2.fromOffset(160, 55)
+        billboard.StudsOffset = Vector3.new(0, 3.3, 0)
+        billboard.AlwaysOnTop = true
+        billboard.MaxDistance = Config.ESPMaxDistance
+        billboard.Adornee = anchor
+        billboard.Parent = anchor
+
+        local info = Instance.new("TextLabel")
+        info.Name = "Info"
+        info.Size = UDim2.fromScale(1, 1)
+        info.BackgroundTransparency = 1
+        info.TextColor3 = Theme.Text
+        info.TextStrokeTransparency = 0.2
+        info.Font = Enum.Font.GothamBold
+        info.TextSize = 9
+        info.TextWrapped = true
+        info.Visible = false
+        info.Parent = billboard
+
+        data.Billboard = billboard
+        data.Info = info
+    elseif anchor and data.Billboard then
+        data.Billboard.Adornee = anchor
+        data.Billboard.MaxDistance = Config.ESPMaxDistance
+    end
+
+    return data
+end
+
+function RemoveESP(player)
+    local data = ESP[player]
+    if data then
+        if data.CharacterConnection then
+            data.CharacterConnection:Disconnect()
+        end
+        DestroyESPObjects(data)
+        ESP[player] = nil
+    end
+end
+
+function UpdateESPPlayer(player)
+    local character = player.Character
+    if not character then
         return
     end
-    if player and IsTeamBlocked(player) then
+
+    local data = EnsureESPObjects(player, character)
+    if not data then
         return
     end
 
-    local root = GetTargetRootPart(model)
-    if not root or not root:IsA("BasePart") then
+    local teamBlocked = IsTeamBlocked(player)
+
+    local targetRoot = character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("Head")
+        or character:FindFirstChildWhichIsA("BasePart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    -- Distance from the character, or from the camera while dead.
+    local cam = getCamera()
+    local origin = (Root and Root.Position) or (cam and cam.CFrame.Position)
+    local distance = (targetRoot and origin) and (origin - targetRoot.Position).Magnitude or nil
+    -- The highlight now respects ESP Max Distance like the text always did.
+    local inRange = distance == nil or distance <= Config.ESPMaxDistance
+
+    if data.Highlight then
+        data.Highlight.Enabled = Config.ESP and Config.ESPHighlight and not teamBlocked and inRange
+
+        if Config.RainbowESP then
+            data.Highlight.FillColor = Color3.fromHSV((os.clock() * 0.12) % 1, 0.80, 1)
+            data.Highlight.OutlineColor = Color3.fromHSV((os.clock() * 0.12 + 0.15) % 1, 0.55, 1)
+        else
+            data.Highlight.FillColor = Theme.Accent
+            data.Highlight.OutlineColor = Theme.Accent2
+        end
+    end
+
+    if not data.Info then
         return
     end
 
-    local humanoid = model:FindFirstChildOfClass("Humanoid")
-    local alive = humanoid ~= nil
-        and humanoid.Health > 0
-        and humanoid:GetState() ~= Enum.HumanoidStateType.Dead
-
-    if not alive and not Config.ESPShowDead then
+    if not distance then
+        data.Info.Visible = false
         return
     end
 
-    local distance = (origin - root.Position).Magnitude
-    if distance > Config.ESPMaxDistance then
-        return
-    end
-
-    local head = model:FindFirstChild("Head")
-    data.Root = root
-    data.Head = (head and head:IsA("BasePart")) and head or nil
-    data.Humanoid = humanoid
-    data.Alive = alive
-    data.Distance = distance
-
-    local health, maxHealth = 0, 0
-    if humanoid then
-        health = math.max(humanoid.Health, 0)
-        maxHealth = humanoid.MaxHealth
-    end
-
-    if alive and maxHealth > 0 and maxHealth < math.huge then
-        data.HealthFraction = math.clamp(health / maxHealth, 0, 1)
-    else
-        data.HealthFraction = alive and 1 or 0
-    end
-
-    if alive and Config.ESPColorMode == "Visible" then
-        data.IsVisible = IsVisible(model, data.Head or root)
-    end
-
-    -- One item per line, in the same order as the old ESP.
     local lines = {}
 
     if Config.ESPNames then
-        local name
-        if player then
-            name = Config.ESPUseDisplayName and player.DisplayName or player.Name
-            if Config.ESPTeamName and player.Team then
-                name ..= " [" .. player.Team.Name .. "]"
-            end
-        elseif humanoid and humanoid.DisplayName ~= "" then
-            name = humanoid.DisplayName
-        else
-            name = model.Name
-        end
-        table.insert(lines, name)
+        table.insert(lines, player.DisplayName)
     end
     if Config.ESPDistance then
         table.insert(lines, math.floor(distance) .. " studs")
     end
     if Config.ESPHealth and humanoid then
-        table.insert(lines, "HP " .. FormatHealth(health) .. "/" .. FormatHealth(maxHealth))
-    end
-    if Config.ESPSpeed then
-        local velocity = root.AssemblyLinearVelocity
-        local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-        table.insert(lines, "SPD " .. math.floor(speed + 0.5))
-    end
-    if Config.ESPTool then
-        local tool = model:FindFirstChildOfClass("Tool")
-        if tool then
-            table.insert(lines, "[" .. tool.Name .. "]")
-        end
-    end
-    if Config.ESPStatus then
-        local status = GetESPStatus(model, humanoid, alive)
-        if status ~= "" then
-            table.insert(lines, status)
-        end
+        table.insert(lines, "HP " .. math.floor(humanoid.Health) .. "/" .. math.floor(humanoid.MaxHealth))
     end
 
-    EnsureESPVisuals(data)
-
-    local textSize = Config.ESPTextSize
-    data.InfoLabel.Text = table.concat(lines, "\n")
-    data.InfoLabel.TextSize = textSize
-    data.InfoLabel.Size = UDim2.fromOffset(160, #lines * (textSize + 2))
-    data.InfoLabel.TextColor3 = alive and Theme.Text or ESPDeadColor
-    data.HasInfo = #lines > 0
-
-    if Config.ESPHighlight then
-        EnsureESPHighlight(data)
-    else
-        DestroyESPHighlight(data)
-    end
-
-    data.Shown = true
+    data.Info.Text = table.concat(lines, "\n")
+    data.Info.Visible = Config.ESP and not teamBlocked and inRange
+    data.Billboard.MaxDistance = Config.ESPMaxDistance
 end
 
 function UpdateESP()
     if not Config.ESP then
-        if next(ESP) then
-            ClearESP()
+        for _, data in pairs(ESP) do
+            if data.Highlight then
+                data.Highlight.Enabled = false
+            end
+            if data.Info then
+                data.Info.Visible = false
+            end
         end
         return
-    end
-
-    local cam = getCamera()
-    -- Distance from your character, or from the camera while you are dead.
-    local origin = (Root and Root.Parent and Root.Position) or (cam and cam.CFrame.Position)
-    if not origin then
-        return
-    end
-
-    for _, data in pairs(ESP) do
-        data.Seen = false
     end
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            SafeCall("ESP:Player", RefreshESPEntry, player, player, player.Character, origin)
+            UpdateESPPlayer(player)
         end
     end
+end
 
-    if Config.ESPNPCs then
-        local npcs = {}
+function BindESPPlayer(player)
+    if player == LocalPlayer then
+        return
+    end
 
-        for humanoid in pairs(AimHumanoids) do
-            local model = humanoid.Parent
-            if model
-                and model:IsA("Model")
-                and model ~= Character
-                and model:IsDescendantOf(Workspace)
-                and not (cam and model:IsDescendantOf(cam))
-                and not (Character and model:IsDescendantOf(Character))
-                and not IsInsidePlayerCharacter(model)
-            then
-                local root = GetTargetRootPart(model)
-                if root and root:IsA("BasePart") then
-                    local distance = (origin - root.Position).Magnitude
-                    if distance <= Config.ESPMaxDistance then
-                        table.insert(npcs, {Model = model, Distance = distance})
-                    end
-                end
+    local data = GetESPData(player)
+
+    if data.CharacterConnection then
+        data.CharacterConnection:Disconnect()
+    end
+
+    -- ESP objects are only created while ESP is on (before, every character
+    -- got a Highlight and a BillboardGui even with ESP never enabled).
+    data.CharacterConnection = player.CharacterAdded:Connect(function(character)
+        -- Rebuild immediately and again after the rig finished loading.
+        task.defer(function()
+            if Config.ESP and ESP[player] and player.Character == character then
+                EnsureESPObjects(player, character)
             end
-        end
-
-        table.sort(npcs, function(a, b)
-            return a.Distance < b.Distance
         end)
 
-        for index = 1, math.min(#npcs, ESPNPCLimit) do
-            local model = npcs[index].Model
-            -- A model with two Humanoids is listed twice.
-            if not (ESP[model] and ESP[model].Seen) then
-                SafeCall("ESP:NPC", RefreshESPEntry, model, nil, model, origin)
+        task.delay(0.5, function()
+            if Config.ESP and ESP[player] and player.Character == character then
+                EnsureESPObjects(player, character)
             end
-        end
-    end
-
-    -- Players who left and NPCs that are gone or out of the limit.
-    for key, data in pairs(ESP) do
-        if not data.Seen then
-            RemoveESP(key)
-        end
-    end
-
-    -- Roblox only draws 31 Highlights at once: the nearest ones get them.
-    local highlighted = {}
-    for _, data in pairs(ESP) do
-        if data.Highlight then
-            if data.Shown and Config.ESPHighlight then
-                table.insert(highlighted, data)
-            else
-                data.Highlight.Enabled = false
-            end
-        end
-    end
-
-    table.sort(highlighted, function(a, b)
-        return a.Distance < b.Distance
+        end)
     end)
 
-    for index, data in ipairs(highlighted) do
-        data.Highlight.Enabled = index <= ESPHighlightLimit
+    if player.Character and Config.ESP then
+        EnsureESPObjects(player, player.Character)
     end
 end
 
-function ResolveESPColor(data)
-    if not data.Alive then
-        return ESPDeadColor
-    end
-
-    if Config.ESPMarkTarget then
-        if (data.Player and data.Player == SelectedTarget)
-            or (CurrentTarget and CurrentTarget.Character == data.Model)
-        then
-            return ESPTargetColor
-        end
-    end
-
-    if Config.RainbowESP then
-        return Color3.fromHSV((os.clock() * 0.12) % 1, 0.8, 1)
-    end
-
-    local mode = Config.ESPColorMode
-    if mode == "Team" then
-        if data.Player and data.Player.Team then
-            return data.Player.TeamColor.Color
-        end
-    elseif mode == "Health" then
-        return HealthColor(data.HealthFraction or 1)
-    elseif mode == "Visible" then
-        return data.IsVisible and Theme.Green or Theme.Red
-    end
-
-    return Theme.Accent2
+for _, player in ipairs(Players:GetPlayers()) do
+    BindESPPlayer(player)
 end
 
-function GetTracerOrigin(viewport)
-    local mode = Config.ESPTracerOrigin
-    if mode == "Top" then
-        return Vector2.new(viewport.X / 2, 0)
-    elseif mode == "Center" then
-        return Vector2.new(viewport.X / 2, viewport.Y / 2)
-    elseif mode == "Mouse" then
-        return UIS:GetMouseLocation()
-    end
-    return Vector2.new(viewport.X / 2, viewport.Y)
-end
+Track(Players.PlayerAdded:Connect(BindESPPlayer))
 
--- Places the 2D parts of one entry. Runs every frame, after all camera
--- changes of this frame (aim, tilt, shoulder), so nothing lags behind.
-function RenderESPEntry(data, cam, tracerFrom)
-    local container = data.Container
-    container.Visible = false
+--============================================================
+-- TRACERS
+--============================================================
 
-    local root = data.Root
-    if not root or not root.Parent then
-        return
-    end
+TracerGui = Instance.new("Frame")
+TracerGui.Name = "Tracers"
+TracerGui.Size = UDim2.fromScale(1, 1)
+TracerGui.BackgroundTransparency = 1
+TracerGui.Parent = Gui
 
-    local color = ResolveESPColor(data)
-
-    local highlight = data.Highlight
-    if highlight then
-        if color == Theme.Accent2 then
-            -- The original purple look: dark fill, light outline.
-            highlight.FillColor = Theme.Accent
-            highlight.OutlineColor = Theme.Accent2
-        else
-            highlight.FillColor = color
-            highlight.OutlineColor = color:Lerp(Color3.new(1, 1, 1), 0.45)
-        end
-    end
-
-    -- Vertical extent of the body: head top to feet. Ragdolls lie on the
-    -- ground, so dead bodies get a small box around the torso instead.
-    local rootPosition = root.Position
-    local top, bottom
-
-    if data.Alive then
-        local head = data.Head
-        local headTop = (head and head.Parent)
-            and (head.Position.Y + head.Size.Y / 2 + 0.25)
-            or (rootPosition.Y + 2.5)
-
-        local legs = 2 -- R6 legs; R15 uses HipHeight
-        local humanoid = data.Humanoid
-        if humanoid and humanoid.RigType == Enum.HumanoidRigType.R15 then
-            legs = humanoid.HipHeight
-        end
-
-        top = math.max(headTop, rootPosition.Y + 1)
-        bottom = rootPosition.Y - root.Size.Y / 2 - legs
-    else
-        top = rootPosition.Y + 1.5
-        bottom = rootPosition.Y - 1.5
-    end
-
-    local topPoint = cam:WorldToViewportPoint(Vector3.new(rootPosition.X, top, rootPosition.Z))
-    local bottomPoint = cam:WorldToViewportPoint(Vector3.new(rootPosition.X, bottom, rootPosition.Z))
-
-    if topPoint.Z <= 0 or bottomPoint.Z <= 0 then
-        return -- behind the camera
-    end
-
-    local height = math.max(math.abs(bottomPoint.Y - topPoint.Y), 6)
-    local width = math.max(height * (data.Alive and 0.6 or 1.2), 6)
-    local centerX = (topPoint.X + bottomPoint.X) / 2
-    local boxTop = math.min(topPoint.Y, bottomPoint.Y)
-    local boxBottom = boxTop + height
-    local left = centerX - width / 2
-
-    local box = data.Box
-    box.Visible = Config.ESPBoxes
-    if Config.ESPBoxes then
-        box.Position = UDim2.fromOffset(left, boxTop)
-        box.Size = UDim2.fromOffset(width, height)
-        data.BoxStroke.Color = color
-    end
-
-    local healthBar = data.HealthBar
-    local showBar = Config.ESPHealthBar and data.Alive and data.Humanoid ~= nil
-    healthBar.Visible = showBar
-    if showBar then
-        local fraction = data.HealthFraction or 1
-        healthBar.Position = UDim2.fromOffset(left - 3, boxTop - 1)
-        healthBar.Size = UDim2.fromOffset(4, height + 2)
-        data.HealthFill.Size = UDim2.new(0, 2, fraction, -2 * fraction)
-        -- Purple like the rest; colored by health only in the Health mode.
-        data.HealthFill.BackgroundColor3 = Config.ESPColorMode == "Health"
-            and HealthColor(fraction)
-            or color
-    end
-
-    local infoLabel = data.InfoLabel
-    infoLabel.Visible = data.HasInfo
-    if data.HasInfo then
-        infoLabel.Position = UDim2.fromOffset(centerX, boxTop - 3)
-    end
-
-    local tracer = data.Tracer
-    tracer.Visible = Config.ESPTracers
-    if Config.ESPTracers then
-        local mode = Config.ESPTracerOrigin
-        local target
-        if mode == "Top" then
-            target = Vector2.new(centerX, boxTop)
-        elseif mode == "Bottom" then
-            target = Vector2.new(centerX, boxBottom)
-        else
-            target = Vector2.new(centerX, boxTop + height / 2)
-        end
-
-        local delta = target - tracerFrom
-        local mid = (tracerFrom + target) / 2
-
-        tracer.Position = UDim2.fromOffset(mid.X, mid.Y)
-        tracer.Size = UDim2.fromOffset(delta.Magnitude, Config.ESPTracerThickness)
-        tracer.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-        tracer.BackgroundColor3 = color
-    end
-
-    container.Visible = true
-end
-
-function UpdateESPRender()
-    if not Config.ESP then
-        if next(ESP) then
-            ClearESP()
-        end
-        return
-    end
-
+function UpdateTracers()
     local cam = getCamera()
-    if not cam or not next(ESP) then
+
+    if not Config.ESP or not Config.ESPTracers or not cam then
+        for _, line in pairs(Tracers) do
+            line.Visible = false
+        end
         return
     end
 
-    local tracerFrom = GetTracerOrigin(cam.ViewportSize)
+    local viewport = cam.ViewportSize
+    local startPoint = Vector2.new(viewport.X / 2, viewport.Y)
 
-    for _, data in pairs(ESP) do
-        if data.Container then
-            if data.Shown then
-                SafeCall("ESP:Render", RenderESPEntry, data, cam, tracerFrom)
-            else
-                data.Container.Visible = false
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local line = Tracers[player]
+            if not line then
+                line = Instance.new("Frame")
+                line.Name = "Tracer"
+                -- Frames rotate around their center, so the line is placed at
+                -- the midpoint. (Before it was anchored at one end and drawn
+                -- in the wrong place when rotated.)
+                line.AnchorPoint = Vector2.new(0.5, 0.5)
+                line.BackgroundColor3 = Theme.Accent2
+                line.BorderSizePixel = 0
+                line.Visible = false
+                line.Parent = TracerGui
+                Tracers[player] = line
             end
+
+            local character = player.Character
+            local targetRoot = character and character:FindFirstChild("HumanoidRootPart")
+            local shown = false
+
+            if targetRoot and Root and not IsTeamBlocked(player) then
+                local distance = (Root.Position - targetRoot.Position).Magnitude
+                local point, onScreen = cam:WorldToViewportPoint(targetRoot.Position)
+
+                if onScreen and distance <= Config.ESPMaxDistance then
+                    local endPoint = Vector2.new(point.X, point.Y)
+                    local delta = endPoint - startPoint
+                    local mid = (startPoint + endPoint) / 2
+
+                    line.Position = UDim2.fromOffset(mid.X, mid.Y)
+                    line.Size = UDim2.fromOffset(delta.Magnitude, 2)
+                    line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+                    line.BackgroundColor3 = Config.RainbowESP
+                        and Color3.fromHSV((os.clock() * 0.12) % 1, 0.8, 1)
+                        or Theme.Accent2
+                    shown = true
+                end
+            end
+
+            line.Visible = shown
         end
     end
 end
@@ -4288,6 +3948,7 @@ end
 --============================================================
 -- FLY
 --============================================================
+
 function DestroyFly()
     if FlyVelocity then
         FlyVelocity:Destroy()
@@ -4421,6 +4082,7 @@ end
 -- NOCLIP (runs on Stepped, before physics, so the Humanoid cannot
 -- re-enable collisions in between)
 --============================================================
+
 function UpdateNoclip()
     if Config.Noclip and Character then
         for _, object in ipairs(Character:GetDescendants()) do
@@ -4446,6 +4108,7 @@ end
 --============================================================
 -- HUMANOID PROPERTIES
 --============================================================
+
 function ManageState(state, disable)
     local flags = ExtraState.Extras.StateFlags
     if disable and not flags[state] then
@@ -4514,6 +4177,7 @@ end
 -- None of these run while flying: they changed the velocity every frame
 -- and fought the fly constraint.
 --============================================================
+
 function IsGrounded()
     return Humanoid ~= nil and Humanoid.FloorMaterial ~= Enum.Material.Air
 end
@@ -4655,6 +4319,7 @@ end
 --============================================================
 -- SPIN BOT / SELF FLING / TARGET FLING
 --============================================================
+
 spinAngle = 0
 
 function UpdateSpinBot(dt)
@@ -4684,6 +4349,7 @@ end
 --============================================================
 -- INFINITE JUMP
 --============================================================
+
 Track(UIS.JumpRequest:Connect(function()
     if not Humanoid or Humanoid.Health <= 0 then
         return
@@ -4697,6 +4363,7 @@ end))
 --============================================================
 -- CLICK TELEPORT
 --============================================================
+
 function DoClickTeleport()
     local cam = getCamera()
     if not Root or not cam then
@@ -4734,6 +4401,7 @@ end
 --============================================================
 -- ANTI AFK
 --============================================================
+
 Track(LocalPlayer.Idled:Connect(function()
     if not Config.AntiAFK then
         return
@@ -4753,6 +4421,7 @@ end))
 --============================================================
 -- LOCAL INVISIBLE / SELF CHAMS
 --============================================================
+
 function UpdateLocalInvisible()
     if Config.LocalInvisible and Character then
         for _, object in ipairs(Character:GetDescendants()) do
@@ -4816,6 +4485,7 @@ end
 --============================================================
 -- LOCAL SKYBOX
 --============================================================
+
 function NormalizeSkyId(value)
     value = tostring(value or "")
     value = value:gsub("^%s+", ""):gsub("%s+$", "")
@@ -4851,8 +4521,8 @@ end
 SkyFaces = {"SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp"}
 
 -- Every ID the user types is resolved once (in the background) into:
---   {Kind = "Image", Content = "rbxassetid://..."}   image, or decal -> its image
---   {Kind = "Sky", Faces = {...}, Props = {...}}      skybox model from the store
+--   {Kind = "Image", Content = "rbxassetid://..."}  image, or decal -> its image
+--   {Kind = "Sky", Faces = {...}, Props = {...}}     skybox model from the store
 --   {Kind = "Error", Message = "..."}
 SkyAssetCache = {}
 SkyAssetLoading = {}
@@ -5353,6 +5023,7 @@ end
 -- Every override goes through SetManaged, so turning a feature off restores
 -- the game's value once instead of freezing the game's lighting forever.
 --============================================================
+
 function UpdateWorld()
     SafeCall("Skybox", UpdateSkybox)
 
@@ -5404,6 +5075,7 @@ end
 --============================================================
 -- AIM
 --============================================================
+
 function IsLocallyTransparent(part)
     if not part or not part:IsA("BasePart") then
         return false
@@ -5519,7 +5191,6 @@ end
 
 -- Every Humanoid in Workspace (bots, dummies, NPCs and player characters),
 -- tracked through events so the whole map never has to be rescanned.
--- Also used by NPC ESP.
 AimHumanoids = {}
 
 function TrackAimHumanoid(object)
@@ -5740,6 +5411,7 @@ end
 --============================================================
 -- CAMERA
 --============================================================
+
 FreeCameraPosition = nil
 FreeCameraYaw = 0
 FreeCameraPitch = 0
@@ -5962,6 +5634,7 @@ end
 --============================================================
 -- PLAYER UTILITIES
 --============================================================
+
 function UpdateAntiVoid()
     if not Root or not Humanoid or not Config.AntiVoid then
         return
@@ -6015,6 +5688,7 @@ end
 --============================================================
 -- RADAR (bottom-left, rotates with the camera)
 --============================================================
+
 Radar = Instance.new("Frame")
 Radar.Name = "Radar"
 Radar.AnchorPoint = Vector2.new(0, 1)
@@ -6107,8 +5781,14 @@ end
 --============================================================
 -- PLAYER CLEANUP
 --============================================================
+
 Track(Players.PlayerRemoving:Connect(function(player)
     RemoveESP(player)
+
+    if Tracers[player] then
+        Tracers[player]:Destroy()
+        Tracers[player] = nil
+    end
 
     if RadarDots[player] then
         RadarDots[player]:Destroy()
@@ -6129,6 +5809,7 @@ end))
 --============================================================
 -- PANIC
 --============================================================
+
 ActiveFeatureDefinitions = {
     {field = "WalkSpeedOverride", label = "WalkSpeed"},
     {field = "JumpPowerOverride", label = "JumpPower"},
@@ -6260,10 +5941,6 @@ function Panic()
         RefreshConfigUI()
     end
 
-    -- ESP highlights live in the game's characters, so they are removed
-    -- right away instead of on the next ESP update.
-    ClearESP()
-
     Gui.Enabled = false
 end
 
@@ -6271,6 +5948,7 @@ end
 -- INPUT (single handler so capture / open / panic / feature keys run in
 -- a fixed order and never double-trigger on the same key press)
 --============================================================
+
 -- A key that becomes the Open or Panic key can no longer toggle a feature
 -- (the Open / Panic check runs first), so such feature binds are removed.
 function ClearFeatureBindsFor(key)
@@ -6442,6 +6120,7 @@ end))
 --============================================================
 -- NETWORK INFO
 --============================================================
+
 function GetPing()
     local ok, value = pcall(function()
         return LocalPlayer:GetNetworkPing()
@@ -6457,6 +6136,7 @@ end
 --============================================================
 -- OVERLAYS
 --============================================================
+
 function CreateStatusOverlay()
     local frame = Instance.new("Frame")
     frame.Name = "DexiStatusOverlay"
@@ -6552,12 +6232,12 @@ end
 
 function UpdateDiagnostics()
     local lines = {}
-    if Config.JobIdOverlay then table.insert(lines, "JOB     " .. tostring(game.JobId)) end
-    if Config.PlaceIdOverlay then table.insert(lines, "PLACE   " .. tostring(game.PlaceId)) end
-    if Config.UserIdOverlay then table.insert(lines, "USERID  " .. tostring(LocalPlayer.UserId)) end
-    if Config.ServerAgeOverlay then table.insert(lines, "AGE     " .. math.floor(Workspace.DistributedGameTime) .. "s") end
+    if Config.JobIdOverlay then table.insert(lines, "JOB       " .. tostring(game.JobId)) end
+    if Config.PlaceIdOverlay then table.insert(lines, "PLACE     " .. tostring(game.PlaceId)) end
+    if Config.UserIdOverlay then table.insert(lines, "USERID    " .. tostring(LocalPlayer.UserId)) end
+    if Config.ServerAgeOverlay then table.insert(lines, "AGE       " .. math.floor(Workspace.DistributedGameTime) .. "s") end
     if Config.InputModeOverlay then
-        table.insert(lines, "INPUT   " .. tostring(UIS:GetLastInputType().Name))
+        table.insert(lines, "INPUT     " .. tostring(UIS:GetLastInputType().Name))
     end
     ExtraState.Extras.Diagnostics = table.concat(lines, "\n")
 end
@@ -6589,12 +6269,13 @@ end
 --============================================================
 -- INFO UPDATES
 --============================================================
+
 function UpdateHomeInfo()
     HomeInfo.Text =
-        "USER    " .. LocalPlayer.DisplayName
-        .. "\nFPS     " .. FPS
-        .. "\nPING    " .. GetPing() .. " ms"
-        .. "\nPLAYERS " .. #Players:GetPlayers()
+        "USER       " .. LocalPlayer.DisplayName
+        .. "\nFPS        " .. FPS
+        .. "\nPING       " .. GetPing() .. " ms"
+        .. "\nPLAYERS    " .. #Players:GetPlayers()
 end
 
 function UpdateActiveInfo()
@@ -6640,7 +6321,7 @@ end
 function UpdateWaypoints()
     local lines = {}
     for index = 1, 5 do
-        table.insert(lines, "WAYPOINT " .. index .. "   " .. (Waypoints[index] and "SAVED" or "Empty"))
+        table.insert(lines, "WAYPOINT " .. index .. "  " .. (Waypoints[index] and "SAVED" or "Empty"))
     end
     WaypointInfo.Text = table.concat(lines, "\n")
 end
@@ -6684,6 +6365,7 @@ end
 --============================================================
 -- SMALL VISUAL HELPERS
 --============================================================
+
 function UpdateFOVCircle()
     FOVCircleFrame.Visible = Config.FOVCircle and Config.AimAssist
     if not FOVCircleFrame.Visible then
@@ -6827,6 +6509,7 @@ end
 --============================================================
 -- ADDED FEATURES (all client-side)
 --============================================================
+
 function CharacterRaycastParams()
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
@@ -6914,6 +6597,7 @@ RunService:BindToRenderStep("DexiAutoWalk", Enum.RenderPriority.Input.Value + 1,
 end)
 
 -- Target player helpers ----------------------------------------------------
+
 function GetTargetRoot()
     if IsValidTargetPlayer(SelectedTarget) then
         return SelectedTarget.Character:FindFirstChild("HumanoidRootPart")
@@ -6976,6 +6660,7 @@ function UpdateFollow()
 end
 
 -- Other players (local only) ------------------------------------------------
+
 function UpdateOtherPlayersVisibility()
     if not Config.HideOtherPlayers and next(HiddenPlayerCache) then
         for object, original in pairs(HiddenPlayerCache) do
@@ -7052,6 +6737,7 @@ function UpdateAntiFling()
 end
 
 -- World tools ---------------------------------------------------------------
+
 function RestoreCache(cache, apply)
     for object, original in pairs(cache) do
         if object.Parent then
@@ -7200,6 +6886,7 @@ function UpdateSelfTrail()
 end
 
 -- Tools ---------------------------------------------------------------------
+
 function GetMouseTarget()
     local cam = getCamera()
     if not cam then
@@ -7312,6 +6999,7 @@ end
 --============================================================
 -- CHARACTER
 --============================================================
+
 function SetupCharacter(character)
     Character = character
     -- Cleared first, so nothing keeps using the previous (dead) humanoid
@@ -7417,6 +7105,7 @@ end
 --============================================================
 -- MAIN UPDATE
 --============================================================
+
 ESPAccumulator = 0
 InfoAccumulator = 0
 
@@ -7439,7 +7128,7 @@ function UpdateSlow()
     SafeCall("ExtraOverlay", UpdateExtraOverlay)
     SafeCall("OtherPlayers", UpdateOtherPlayersVisibility)
     SafeCall("Persist", FlushPersist)
-    SkyStatusInfo.Text = "SKYBOX  " .. SkyboxStatus
+    SkyStatusInfo.Text = "SKYBOX      " .. SkyboxStatus
 end
 
 function UpdateFrame(dt)
@@ -7488,14 +7177,12 @@ function UpdateFrame(dt)
     SafeCall("LowHealth", UpdateLowHealth)
     SafeCall("Radar", UpdateRadar)
     SafeCall("VisualExtras", UpdateVisualExtras)
+    SafeCall("Tracers", UpdateTracers)
     SafeCall("WorldSweep", UpdateWorldSweep)
     SafeCall("MuteSounds", UpdateMuteSounds)
     SafeCall("SelfTrail", UpdateSelfTrail)
     SafeCall("PartInspector", UpdatePartInspector)
 
-    -- ESP: who / what is shown is read 10 times per second, and drawn every
-    -- frame after all camera changes above (the ESP refresh used to run
-    -- after the tracers, so new targets appeared one frame late).
     -- Timers replace "now % 0.1 < dt", which skipped or repeated updates
     -- depending on the frame rate.
     ESPAccumulator += dt
@@ -7503,7 +7190,6 @@ function UpdateFrame(dt)
         ESPAccumulator = 0
         SafeCall("ESP", UpdateESP)
     end
-    SafeCall("ESPRender", UpdateESPRender)
 
     InfoAccumulator += dt
     if InfoAccumulator >= 0.2 then
@@ -7518,6 +7204,7 @@ Track(RunService.RenderStepped:Connect(UpdateFrame))
 --============================================================
 -- SHUTDOWN (Unload button, and automatically when the script runs again)
 --============================================================
+
 function Shutdown()
     if ShutdownDone then
         return
@@ -7564,8 +7251,9 @@ function Shutdown()
     RestoreGameSkies()
     RestoreDeletedParts(true)
 
-    -- Highlights inside other players' characters (the 2D parts go with Gui).
-    ClearESP()
+    for player in pairs(ESP) do
+        RemoveESP(player)
+    end
 
     local ex = ExtraState.Extras
     for player, gui in pairs(ex.HeadDots) do
@@ -7599,13 +7287,16 @@ _G.DexiShutdown = Shutdown
 --============================================================
 -- INITIAL STATE
 --============================================================
+
 SetPage("Home")
 ApplyCompactMode()
 ApplyResponsiveLayout()
+
 UpdateSlow()
 SafeCall("Crosshair", UpdateCrosshair)
 SafeCall("FOVCircle", UpdateFOVCircle)
 SafeCall("LowHealth", UpdateLowHealth)
+
 LoadStoredProfiles()
 
 Notify(
